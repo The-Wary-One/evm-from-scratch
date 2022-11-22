@@ -1,29 +1,25 @@
 use primitive_types::U256;
 
+mod execution;
+pub(crate) mod utils;
+use execution::*;
+
 pub struct EvmResult {
     pub stack: Vec<U256>,
     pub success: bool,
 }
 
-pub fn evm(_code: impl AsRef<[u8]>) -> EvmResult {
-    let stack: Vec<U256> = Vec::new();
-    let mut pc = 0;
-
-    let code = _code.as_ref();
-
-    while pc < code.len() {
-        let opcode = code[pc];
-        pc += 1;
-
-        if opcode == 0x00 {
-            // STOP
+impl<'a> From<ExecutionResult<'_>> for EvmResult {
+    fn from(result: ExecutionResult) -> Self {
+        Self {
+            stack: result.stack().into(),
+            success: result.result().is_ok(),
         }
     }
+}
 
-    // TODO: Implement me
-
-    return EvmResult {
-        stack: stack,
-        success: true,
-    };
+pub fn evm(_code: impl AsRef<[u8]> + std::fmt::Debug) -> EvmResult {
+    let env = ExecutionEnvInit::new(_code.as_ref());
+    let result = ExecutionEnv::execute(env);
+    result.into()
 }
