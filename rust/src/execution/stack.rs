@@ -1,27 +1,11 @@
-use crate::utils::*;
-use primitive_types::U256;
+use ruint::{aliases::U256, UintTryFrom};
 use thiserror::Error;
 
 #[derive(Debug)]
-pub(crate) struct StackImpl<S: State> {
+pub(crate) struct Stack {
     /// The index of the stack's top.
     top: Option<usize>,
     arr: [U256; 1024],
-    _state: std::marker::PhantomData<S>,
-}
-
-pub(super) type StackInit = StackImpl<Init>;
-pub(super) type Stack = StackImpl<Ready>;
-pub(crate) type StackResult = StackImpl<Completed>;
-
-impl StackInit {
-    pub(super) fn new() -> Stack {
-        Stack {
-            top: None,
-            arr: [U256::default(); 1024],
-            _state: std::marker::PhantomData,
-        }
-    }
 }
 
 #[derive(Error, Debug)]
@@ -42,12 +26,22 @@ impl std::fmt::Display for StackError {
 }
 
 impl Stack {
+    pub(super) fn new() -> Self {
+        Self {
+            top: None,
+            arr: [U256::default(); 1024],
+        }
+    }
+
     pub(super) fn top(&self) -> Option<usize> {
         self.top
     }
 
-    pub(super) fn push(&mut self, n: impl Into<U256>) -> Result<()> {
-        let n = n.into();
+    pub(super) fn push<T>(&mut self, n: T) -> Result<()>
+    where
+        U256: UintTryFrom<T>,
+    {
+        let n = U256::saturating_from(n);
         log::trace!(
             "push(n={}): top={:?}, arr={:02X?}",
             n,
@@ -121,10 +115,16 @@ impl Stack {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct StackResult {
+    /// The index of the stack's top.
+    top: Option<usize>,
+    arr: [U256; 1024],
+}
+
 impl From<Stack> for StackResult {
     fn from(stack: Stack) -> Self {
         Self {
-            _state: std::marker::PhantomData,
             top: stack.top,
             arr: stack.arr,
         }

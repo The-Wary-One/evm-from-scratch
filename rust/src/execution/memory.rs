@@ -1,24 +1,16 @@
-use primitive_types::U256;
+use ruint::aliases::U256;
 use thiserror::Error;
 
-use crate::utils::{Bytesize, Completed, Init, Ready, State};
+use crate::types::Bytesize;
 
 #[derive(Debug)]
-pub(super) struct MemoryImpl<S: State> {
-    _state: std::marker::PhantomData<S>,
+pub(super) struct Memory {
     mem: Vec<u8>,
 }
 
-pub(super) type MemoryInit = MemoryImpl<Init>;
-pub(super) type Memory = MemoryImpl<Ready>;
-pub(super) type MemoryResult = MemoryImpl<Completed>;
-
-impl MemoryInit {
+impl Memory {
     pub fn new() -> Memory {
-        Memory {
-            _state: std::marker::PhantomData,
-            mem: vec![],
-        }
+        Memory { mem: vec![] }
     }
 }
 
@@ -33,20 +25,35 @@ impl Memory {
         Ok(())
     }
 
-    pub(super) fn load(&mut self, offset: U256) -> Result<U256> {
-        log::trace!("load(): mem={:?}, offset={:?}", self.mem, offset);
+    pub(super) fn load(&mut self, offset: U256, size: U256) -> Result<&[u8]> {
+        log::trace!(
+            "load(): mem={:?}, offset={:?}, size={:?}",
+            self.mem,
+            offset,
+            size
+        );
 
-        let offset = usize::try_from(offset.min(usize::MAX.into())).expect("safe");
-        let max = offset + usize::from(Bytesize::MAX);
+        let offset = usize::try_from(offset.min(U256::from(usize::MAX))).expect("safe");
+        let size = usize::try_from(size.min(U256::from(usize::MAX))).expect("safe");
+        let max = offset + size - 1;
         // Expand memory if needed.
         while self.size() < max {
             self.expand_mem()?;
         }
 
         // Load from memory.
-        let value = U256::from(self.mem.get(offset..=max).expect("safe"));
+        let value = self.mem.get(offset..=max).expect("safe");
         log::trace!("result: mem={:?}, value={:?}", self.mem, value);
         Ok(value)
+    }
+
+    pub(super) fn load_u256(&mut self, offset: U256) -> Result<U256> {
+        log::trace!("load_u256(): mem={:?}, offset={:?}", self.mem, offset);
+        self.load(
+            offset,
+            <U256 as From<Bytesize>>::from(Bytesize::MAX) + U256::from(1),
+        )
+        .map(|b| U256::try_from_be_slice(b).expect("safe"))
     }
 
     pub(super) fn store(&mut self, offset: U256, value: U256) -> Result<()> {
@@ -57,7 +64,7 @@ impl Memory {
             value
         );
 
-        let offset = usize::try_from(offset.min(usize::MAX.into())).expect("safe");
+        let offset = offset.saturating_to::<usize>();
         let max = offset + usize::from(Bytesize::MAX);
         // Expand memory if needed.
         while self.size() < max {
@@ -65,7 +72,7 @@ impl Memory {
         }
 
         // Write to memory.
-        value.to_big_endian(&mut self.mem[offset..=max]);
+        &mut self.mem[offset..=max].copy_from_slice(&value.to_be_bytes::<0x20>());
 
         log::trace!("result: mem={:?}", self.mem);
         Ok(())
@@ -79,7 +86,7 @@ impl Memory {
             value
         );
 
-        let offset = usize::try_from(offset.min(usize::MAX.into())).expect("safe");
+        let offset = offset.saturating_to::<usize>();
         let max = offset + 1;
         // Expand memory if needed.
         while self.size() < max {
@@ -87,7 +94,7 @@ impl Memory {
         }
 
         // Write to memory.
-        let value = value.byte(0);
+        let value = value.to_be_bytes::<0x20>()[usize::from(Bytesize::MAX)];
         self.mem[offset] = value;
 
         log::trace!("result: mem={:?}", self.mem);
@@ -95,12 +102,14 @@ impl Memory {
     }
 }
 
+#[derive(Debug)]
+pub(super) struct MemoryResult {
+    mem: Vec<u8>,
+}
+
 impl From<Memory> for MemoryResult {
     fn from(mem: Memory) -> Self {
-        Self {
-            _state: std::marker::PhantomData,
-            mem: mem.mem,
-        }
+        Self { mem: mem.mem }
     }
 }
 

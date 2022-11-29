@@ -1,4 +1,5 @@
-use primitive_types::U256;
+use super::{Bitsize, Bytesize};
+use ruint::{aliases::U256, uint};
 use std::{cmp, ops};
 
 #[derive(Debug, Clone)]
@@ -7,22 +8,18 @@ pub struct Int256(U256);
 
 impl Int256 {
     pub fn zero() -> Self {
-        Int256(U256::zero())
+        Int256(U256::ZERO)
     }
     pub fn negative_one() -> Self {
-        Int256(U256::from(
-            "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-        ))
+        Int256(uint!(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_U256))
     }
 
     pub fn max_negative_value() -> Self {
-        Int256(U256::from(
-            "0x8000000000000000000000000000000000000000000000000000000000000000",
-        ))
+        Int256(uint!(0x8000000000000000000000000000000000000000000000000000000000000000_U256))
     }
 
     pub fn is_zero(&self) -> bool {
-        self.0.is_zero()
+        self.0 == U256::ZERO
     }
 
     pub fn is_negative(&self) -> bool {
@@ -31,7 +28,7 @@ impl Int256 {
 
     pub fn abs(&self) -> U256 {
         if self.is_negative() {
-            !self.0 + 1
+            !self.0 + U256::from(1)
         } else {
             self.0
         }
@@ -40,7 +37,7 @@ impl Int256 {
     pub fn from_u256(u: U256, is_negative: bool) -> Self {
         if is_negative {
             // Two's complement.
-            Int256(!u + 1)
+            Int256(!u + U256::from(1))
         } else {
             Int256(u)
         }
@@ -178,7 +175,7 @@ impl ops::Shr<Bitsize> for Int256 {
             (false, true) => Int256::zero(),
             (true, true) => Int256::negative_one(),
             (is_negative, _) => {
-                let raw = self.0 >> U256::from(&shift);
+                let raw = self.0 >> &shift.clone().into();
                 if is_negative {
                     let int = IntN::from_raw_u256(raw, shift.into());
                     int.sign_extend()
@@ -208,12 +205,11 @@ impl IntN {
         if self.is_negative() {
             // Replace the leading zeros with 0xFF.
             let size: usize = self.size.into();
-            let mut bytes = [0; 0x20];
-            self.raw.to_big_endian(&mut bytes);
+            let mut bytes = self.raw.to_be_bytes::<0x20>();
             (0..0x1F - size).for_each(|b| {
                 bytes[b] = 0xFF;
             });
-            Int256(U256::from(bytes))
+            Int256(U256::from_be_bytes(bytes))
         } else {
             // Do nothing.
             Int256::from_raw_u256(self.raw)
@@ -223,81 +219,5 @@ impl IntN {
     pub fn from_raw_u256(raw: U256, size: Bytesize) -> Self {
         // Assume u is already signed.
         IntN { raw, size }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
-/// A U256 value between 0 and 255
-pub struct Bitsize(usize);
-
-impl Bitsize {
-    pub const MIN: Self = Self(0x00);
-
-    pub const MAX: Self = Self(0xFF);
-}
-
-impl From<U256> for Bitsize {
-    fn from(u: U256) -> Self {
-        let s: U256 = u.clamp(U256::from(Self::MIN), U256::from(Self::MAX));
-        Self(usize::try_from(s).expect("safe"))
-    }
-}
-
-impl From<Bitsize> for U256 {
-    fn from(s: Bitsize) -> Self {
-        U256::from(s.0)
-    }
-}
-
-impl From<&Bitsize> for U256 {
-    fn from(s: &Bitsize) -> Self {
-        U256::from(s.0)
-    }
-}
-
-impl From<Bitsize> for usize {
-    fn from(s: Bitsize) -> Self {
-        s.0
-    }
-}
-
-impl From<Bytesize> for Bitsize {
-    fn from(s: Bytesize) -> Self {
-        Self(usize::from(s) * 8 + 7)
-    }
-}
-
-impl From<Bitsize> for Bytesize {
-    fn from(s: Bitsize) -> Self {
-        Self(usize::from(s) / 8)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq)]
-/// A U256 value between 0 and 31.
-pub struct Bytesize(usize);
-
-impl Bytesize {
-    pub const MIN: Self = Self(0x00);
-
-    pub const MAX: Self = Self(0x1F);
-}
-
-impl From<U256> for Bytesize {
-    fn from(u: U256) -> Self {
-        let s: U256 = u.clamp(U256::from(Self::MIN), U256::from(Self::MAX));
-        Self(usize::try_from(s).expect("safe"))
-    }
-}
-
-impl From<Bytesize> for U256 {
-    fn from(s: Bytesize) -> Self {
-        U256::from(s.0)
-    }
-}
-
-impl From<Bytesize> for usize {
-    fn from(s: Bytesize) -> Self {
-        s.0
     }
 }

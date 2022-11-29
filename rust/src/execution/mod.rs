@@ -1,6 +1,6 @@
 mod code;
-mod environment;
+mod evm;
 mod memory;
 mod stack;
 
-pub(super) use environment::*;
+pub(super) use evm::*;

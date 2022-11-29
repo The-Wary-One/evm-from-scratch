@@ -1,19 +1,12 @@
-use primitive_types::U256;
+use ruint::aliases::U256;
 use thiserror::Error;
 
-use crate::utils::*;
-
 #[derive(Debug)]
-pub(super) struct CodeImpl<'a, S: State> {
-    _state: std::marker::PhantomData<S>,
+pub(super) struct Code<'a> {
     bytecode: &'a [u8],
     opcodes: Vec<Option<Opcode>>,
     pc: usize,
 }
-
-pub(super) type CodeInit<'a> = CodeImpl<'a, Init>;
-pub(super) type Code<'a> = CodeImpl<'a, Ready>;
-pub(super) type CodeResult<'a> = CodeImpl<'a, Completed>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Opcode {
@@ -43,6 +36,19 @@ pub(super) enum Opcode {
     SHL,
     SHR,
     SAR,
+    SHA3,
+    ADDRESS,
+    ORIGIN,
+    CALLER,
+    GASPRICE,
+    BLOCKHASH,
+    COINBASE,
+    TIMESTAMP,
+    NUMBER,
+    DIFFICULTY,
+    GASLIMIT,
+    CHAINID,
+    BASEFEE,
     POP,
     MLOAD,
     MSTORE,
@@ -59,12 +65,11 @@ pub(super) enum Opcode {
     INVALID,
 }
 
-impl<'a> CodeInit<'a> {
+impl<'a> Code<'a> {
     pub fn new(bytecode: &'a [u8]) -> Code<'a> {
         Code {
-            _state: std::marker::PhantomData,
             bytecode,
-            opcodes: CodeInit::opcodes(bytecode),
+            opcodes: Code::opcodes(bytecode),
             pc: 0,
         }
     }
@@ -105,6 +110,19 @@ impl<'a> CodeInit<'a> {
                 0x1B => SHL,
                 0x1C => SHR,
                 0x1D => SAR,
+                0x20 => SHA3,
+                0x30 => ADDRESS,
+                0x32 => ORIGIN,
+                0x33 => CALLER,
+                0x3A => GASPRICE,
+                0x40 => BLOCKHASH,
+                0x41 => COINBASE,
+                0x42 => TIMESTAMP,
+                0x43 => NUMBER,
+                0x44 => DIFFICULTY,
+                0x45 => GASLIMIT,
+                0x46 => CHAINID,
+                0x48 => BASEFEE,
                 0x50 => POP,
                 0x51 => MLOAD,
                 0x52 => MSTORE,
@@ -122,7 +140,7 @@ impl<'a> CodeInit<'a> {
                     let bytes = &bytecode[counter..std::cmp::min(counter + len, bytecode.len())];
                     // The end of the number in the bytecode.
                     counter += len;
-                    PUSH(U256::from_big_endian(&bytes))
+                    PUSH(U256::try_from_be_slice(&bytes).expect("safe"))
                 }
                 0x80..=0x8F => {
                     // 1 <= len <= 16
@@ -222,18 +240,22 @@ impl<'a> Iterator for Code<'a> {
     }
 }
 
+#[derive(Debug)]
+pub(super) struct CodeResult<'a> {
+    bytecode: &'a [u8],
+    opcodes: Vec<Option<Opcode>>,
+    pc: usize,
+}
+
 impl<'a> From<Code<'a>> for CodeResult<'a> {
     fn from(code: Code<'a>) -> Self {
         Self {
-            _state: std::marker::PhantomData,
             bytecode: code.bytecode,
             opcodes: code.opcodes,
             pc: code.pc,
         }
     }
 }
-
-impl<'a> CodeResult<'a> {}
 
 #[cfg(test)]
 mod tests {
@@ -242,7 +264,7 @@ mod tests {
     #[test]
     fn should_iterate_over_bytecode() {
         let raw = [0x00, 0xFE];
-        let mut code = CodeInit::new(&raw);
+        let mut code = Code::new(&raw);
         assert_eq!(Some(Opcode::STOP), code.next());
         assert_eq!(Some(Opcode::INVALID), code.next());
     }
