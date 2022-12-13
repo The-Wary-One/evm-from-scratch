@@ -25,7 +25,7 @@ impl Memory {
         Ok(())
     }
 
-    pub(super) fn load(&mut self, offset: U256, size: U256) -> Result<&[u8]> {
+    pub(super) fn load(&mut self, offset: usize, size: usize) -> Result<&[u8]> {
         log::trace!(
             "load(): mem={:?}, offset={:?}, size={:?}",
             self.mem,
@@ -33,8 +33,6 @@ impl Memory {
             size
         );
 
-        let offset = usize::try_from(offset.min(U256::from(usize::MAX))).expect("safe");
-        let size = usize::try_from(size.min(U256::from(usize::MAX))).expect("safe");
         let max = offset + size - 1;
         // Expand memory if needed.
         while self.size() < max {
@@ -47,58 +45,40 @@ impl Memory {
         Ok(value)
     }
 
-    pub(super) fn load_u256(&mut self, offset: U256) -> Result<U256> {
+    pub(super) fn load_u256(&mut self, offset: usize) -> Result<U256> {
         log::trace!("load_u256(): mem={:?}, offset={:?}", self.mem, offset);
-        self.load(
-            offset,
-            <U256 as From<Bytesize>>::from(Bytesize::MAX) + U256::from(1),
-        )
-        .map(|b| U256::try_from_be_slice(b).expect("safe"))
+        self.load(offset, 0x20)
+            .map(|b| U256::try_from_be_slice(b).expect("safe"))
     }
 
-    pub(super) fn store(&mut self, offset: U256, value: U256) -> Result<()> {
+    pub(super) fn store(&mut self, offset: usize, size: usize, value: &[u8]) -> Result<()> {
         log::trace!(
-            "store(): mem={:?}, offset={:?}, value={:?}",
+            "store(): mem={:?}, offset={:?}, size={:?}, value={:?}",
             self.mem,
             offset,
+            size,
             value
         );
 
-        let offset = offset.saturating_to::<usize>();
-        let max = offset + usize::from(Bytesize::MAX);
+        let max = offset + size;
         // Expand memory if needed.
         while self.size() < max {
             self.expand_mem()?;
         }
 
         // Write to memory.
-        &mut self.mem[offset..=max].copy_from_slice(&value.to_be_bytes::<0x20>());
+        let _ = &mut self.mem[offset..max].copy_from_slice(value);
 
         log::trace!("result: mem={:?}", self.mem);
         Ok(())
     }
 
-    pub(super) fn store8(&mut self, offset: U256, value: U256) -> Result<()> {
-        log::trace!(
-            "store8(): mem={:?}, offset={:?}, value={:?}",
-            self.mem,
-            offset,
-            value
-        );
+    pub(super) fn store_u256(&mut self, offset: usize, value: U256) -> Result<()> {
+        self.store(offset, 0x20, &value.to_be_bytes::<0x20>())
+    }
 
-        let offset = offset.saturating_to::<usize>();
-        let max = offset + 1;
-        // Expand memory if needed.
-        while self.size() < max {
-            self.expand_mem()?;
-        }
-
-        // Write to memory.
-        let value = value.to_be_bytes::<0x20>()[usize::from(Bytesize::MAX)];
-        self.mem[offset] = value;
-
-        log::trace!("result: mem={:?}", self.mem);
-        Ok(())
+    pub(super) fn store_u8(&mut self, offset: usize, value: u8) -> Result<()> {
+        self.store(offset, 0x01, vec![value; 0x01].as_ref())
     }
 }
 
@@ -113,7 +93,7 @@ impl From<Memory> for MemoryResult {
     }
 }
 
-type Result<T> = std::result::Result<T, MemoryError>;
+pub(super) type Result<T> = std::result::Result<T, MemoryError>;
 
 #[derive(Error, Debug)]
 pub enum MemoryError {}

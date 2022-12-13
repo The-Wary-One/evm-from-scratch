@@ -21,13 +21,8 @@ impl<'a> From<EVMResult<'_>> for TestResult {
 
 impl Transaction {
     pub fn process(&self, env: &Environment) -> TestResult {
-        let message = Message::new(
-            self.from(),
-            self.to(),
-            self.gas(),
-            self.value(),
-            self.data(),
-        );
+        let data = Calldata::new(self.data());
+        let message = Message::new(self.from(), self.to(), self.gas(), self.value(), &data);
         Message::process(&message, &env).into()
     }
 }

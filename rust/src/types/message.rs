@@ -1,6 +1,6 @@
-use ruint::aliases::U256;
-
+use super::Calldata;
 use crate::types::Address;
+use ruint::aliases::U256;
 
 #[derive(Debug)]
 /// Items that are used by contract creation or message call.
@@ -9,14 +9,14 @@ pub enum Message<'a> {
         caller: &'a Address,
         gas: &'a U256,
         value: &'a U256,
-        data: &'a [u8],
+        data: &'a Calldata<'a>,
     },
     Call {
         caller: &'a Address,
         target: &'a Address,
         gas: &'a U256,
         value: &'a U256,
-        data: &'a [u8],
+        data: &'a Calldata<'a>,
     },
 }
 
@@ -26,7 +26,7 @@ impl<'a> Message<'a> {
         target: &'a Option<Address>,
         gas: &'a U256,
         value: &'a U256,
-        data: &'a [u8],
+        data: &'a Calldata<'a>,
     ) -> Self {
         if let Some(target) = target {
             Self::Call {
@@ -57,6 +57,13 @@ impl<'a> Message<'a> {
         match &self {
             Message::Call { value, .. } => &value,
             Message::Create { value, .. } => &value,
+        }
+    }
+
+    pub(crate) fn data(&self) -> &Calldata {
+        match &self {
+            Message::Call { data, .. } => &data,
+            Message::Create { data, .. } => &data,
         }
     }
 }

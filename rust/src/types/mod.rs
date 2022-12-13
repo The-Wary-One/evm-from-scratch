@@ -1,6 +1,7 @@
 mod account;
 mod address;
 mod bytes;
+mod calldata;
 mod environment;
 mod int256;
 mod message;
@@ -10,6 +11,7 @@ mod transaction;
 pub use account::*;
 pub use address::*;
 pub use bytes::*;
+pub use calldata::*;
 pub use environment::*;
 pub use int256::*;
 pub use message::*;

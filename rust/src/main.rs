@@ -68,10 +68,8 @@ struct Tx {
 
 #[derive(Debug, Deserialize, Clone)]
 struct AccountTest {
-    #[serde(default)]
-    balance: U256,
-    #[serde(default)]
-    code: Code,
+    balance: Option<U256>,
+    code: Option<Code>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -131,7 +129,7 @@ fn main() {
         let transaction = Transaction::new(
             test.tx.gasprice,
             U256::default(),
-            from,
+            from.clone(),
             to.clone(),
             test.tx.value.clone(),
             test.tx.data.clone(),
@@ -142,12 +140,14 @@ fn main() {
             .state
             .clone()
             .into_iter()
-            .map(|(k, v)| (k.clone(), Account::new(v.balance, v.code.bin)))
+            .map(|(k, v)| (k.clone(), Account::new(v.balance, v.code.map(|c| c.bin))))
             .collect::<HashMap<Address, Account>>();
+        // Give from ETH.
+        accounts.insert(from, Account::new(Some(test.tx.value), None));
         // Code to execute should be the to account code.
         accounts.insert(
             to.expect("safe"),
-            Account::new(U256::ZERO, test.code.bin.clone()),
+            Account::new(None, Some(test.code.bin.clone())),
         );
         let state = State::new(accounts);
         // Setup the chain environment.

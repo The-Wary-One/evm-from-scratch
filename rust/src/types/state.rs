@@ -1,4 +1,4 @@
-use crate::types::{Account, AccountError, Address, ACCOUNT_DEFAULT};
+use crate::types::{Account, AccountError, Address, EMPTY_ACCOUNT};
 use ruint::aliases::U256;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -15,7 +15,7 @@ impl<'a> State {
     }
 
     pub(crate) fn get_account(&self, addr: &Address) -> &Account {
-        self.accounts.get(addr).unwrap_or_else(|| &ACCOUNT_DEFAULT)
+        self.accounts.get(addr).unwrap_or_else(|| &EMPTY_ACCOUNT)
     }
 
     fn update_account(

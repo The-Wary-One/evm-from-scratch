@@ -38,9 +38,19 @@ pub(super) enum Opcode {
     SAR,
     SHA3,
     ADDRESS,
+    BALANCE,
     ORIGIN,
     CALLER,
+    CALLVALUE,
+    CALLDATALOAD,
+    CALLDATASIZE,
+    CALLDATACOPY,
+    CODESIZE,
+    CODECOPY,
     GASPRICE,
+    EXTCODESIZE,
+    EXTCODECOPY,
+    EXTCODEHASH,
     BLOCKHASH,
     COINBASE,
     TIMESTAMP,
@@ -72,6 +82,43 @@ impl<'a> Code<'a> {
             opcodes: Code::opcodes(bytecode),
             pc: 0,
         }
+    }
+
+    pub(super) fn pc(&self) -> usize {
+        self.pc
+    }
+
+    pub(super) fn size(&self) -> usize {
+        self.bytecode.len()
+    }
+
+    pub(super) fn jump_to(&mut self, counter: U256) -> Result<()> {
+        match usize::try_from(counter)
+            .ok()
+            .and_then(|c| {
+                self.opcodes
+                    .get(c)
+                    .map(|o| o.to_owned())
+                    .flatten()
+                    .map(|op| (c, op))
+            })
+            .filter(|(_, op)| *op == Opcode::JUMPDEST)
+        {
+            None => Err(CodeError::InvalidJumpdest),
+            Some((c, _)) => {
+                self.pc = c;
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn load(&self, offset: usize, size: usize) -> Vec<u8> {
+        let mut bytes = vec![0x00; size];
+        for n in 0..size {
+            let b = self.bytecode.get(offset + n).unwrap_or(&0x00);
+            bytes[n] = *b;
+        }
+        bytes
     }
 
     fn opcodes(bytecode: &'a [u8]) -> Vec<Option<Opcode>> {
@@ -112,9 +159,19 @@ impl<'a> Code<'a> {
                 0x1D => SAR,
                 0x20 => SHA3,
                 0x30 => ADDRESS,
+                0x31 => BALANCE,
                 0x32 => ORIGIN,
                 0x33 => CALLER,
+                0x34 => CALLVALUE,
+                0x35 => CALLDATALOAD,
+                0x36 => CALLDATASIZE,
+                0x37 => CALLDATACOPY,
+                0x38 => CODESIZE,
+                0x39 => CODECOPY,
                 0x3A => GASPRICE,
+                0x3B => EXTCODESIZE,
+                0x3C => EXTCODECOPY,
+                0x3F => EXTCODEHASH,
                 0x40 => BLOCKHASH,
                 0x41 => COINBASE,
                 0x42 => TIMESTAMP,
@@ -174,32 +231,6 @@ impl std::fmt::Display for CodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CodeError::InvalidJumpdest => write!(f, "invalid jumpdest"),
-        }
-    }
-}
-
-impl<'a> Code<'a> {
-    pub(super) fn pc(&self) -> usize {
-        self.pc
-    }
-
-    pub(super) fn jump_to(&mut self, counter: U256) -> Result<()> {
-        match usize::try_from(counter)
-            .ok()
-            .and_then(|c| {
-                self.opcodes
-                    .get(c)
-                    .map(|o| o.to_owned())
-                    .flatten()
-                    .map(|op| (c, op))
-            })
-            .filter(|(_, op)| *op == Opcode::JUMPDEST)
-        {
-            None => Err(CodeError::InvalidJumpdest),
-            Some((c, _)) => {
-                self.pc = c;
-                Ok(())
-            }
         }
     }
 }

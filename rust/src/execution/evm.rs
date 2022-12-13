@@ -476,6 +476,8 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .and_then(|offset| self.stack.pop().map(|size| (offset, size)))
                 .map_err(EVMError::StackError)
                 .and_then(|(offset, size)| {
+                    let offset = offset.saturating_to();
+                    let size = size.saturating_to();
                     self.memory
                         .load(offset, size)
                         .map_err(EVMError::MemoryError)
@@ -512,6 +514,20 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
                 Message::Create { .. } => todo!(),
             },
+            BALANCE => match self
+                .stack
+                .pop()
+                .map(|addr| self.env.state().get_account(&addr.into()).balance())
+                .and_then(|balance| self.stack.push(*balance))
+                .map_err(EVMError::StackError)
+            {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
             ORIGIN => match self
                 .stack
                 .push(<U256 as From<&Address>>::from(self.env.caller()))
@@ -524,26 +540,175 @@ impl<'a> Iterator for &mut EVM<'a> {
                     None
                 }
             },
-            CALLER => match self.message {
-                Message::Call { caller, .. } => {
-                    match self
-                        .stack
-                        .push(<U256 as From<&Address>>::from(caller))
-                        .map_err(EVMError::StackError)
-                    {
-                        Ok(_) => Some(()),
-                        e => {
-                            self.result = Some(e);
-                            // Stop.
-                            None
-                        }
-                    }
+            CALLER => match self
+                .stack
+                .push(<U256 as From<&Address>>::from(self.message.caller()))
+                .map_err(EVMError::StackError)
+            {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
                 }
-                Message::Create { .. } => todo!(),
+            },
+            CALLVALUE => match self
+                .stack
+                .push(*self.message.value())
+                .map_err(EVMError::StackError)
+            {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            CALLDATALOAD => match self
+                .stack
+                .pop()
+                .map(|i| self.message.data().load_word(i.saturating_to()))
+                .and_then(|data| self.stack.push(U256::from_be_bytes(data)))
+                .map_err(EVMError::StackError)
+            {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            CALLDATASIZE => match self
+                .stack
+                .push(self.message.data().size())
+                .map_err(EVMError::StackError)
+            {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            CALLDATACOPY => match self
+                .stack
+                .pop()
+                .and_then(|dest_offset| self.stack.pop().map(|offset| (dest_offset, offset)))
+                .and_then(|(dest_offset, offset)| {
+                    self.stack.pop().map(|size| (dest_offset, offset, size))
+                })
+                .map_err(EVMError::StackError)
+                .and_then(|(dest_offset, offset, size)| {
+                    let dest_offset = dest_offset.saturating_to::<usize>();
+                    let offset = offset.saturating_to::<usize>();
+                    let size = size.saturating_to::<usize>();
+
+                    self.memory
+                        .store(
+                            dest_offset,
+                            size,
+                            self.message.data().load(offset, size).as_ref(),
+                        )
+                        .map_err(EVMError::MemoryError)
+                }) {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            CODESIZE => match self.stack.push(self.code.size()) {
+                Ok(_) => Some(()),
+                Err(e) => {
+                    self.result = Some(Err(EVMError::StackError(e)));
+                    // Stop.
+                    None
+                }
+            },
+            CODECOPY => match self
+                .stack
+                .pop()
+                .and_then(|dest_offset| self.stack.pop().map(|offset| (dest_offset, offset)))
+                .and_then(|(dest_offset, offset)| {
+                    self.stack.pop().map(|size| (dest_offset, offset, size))
+                })
+                .map_err(EVMError::StackError)
+                .and_then(|(dest_offset, offset, size)| {
+                    let dest_offset = dest_offset.saturating_to();
+                    let offset = offset.saturating_to();
+                    let size = size.saturating_to();
+
+                    self.memory
+                        .store(dest_offset, size, self.code.load(offset, size).as_ref())
+                        .map_err(EVMError::MemoryError)
+                }) {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
             },
             GASPRICE => match self
                 .stack
                 .push(*self.env.gas_price())
+                .map_err(EVMError::StackError)
+            {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            EXTCODESIZE => match self.stack.pop().map(Address::from).and_then(|addr| {
+                self.stack
+                    .push(self.env.state().get_account(&addr).code().len())
+            }) {
+                Ok(_) => Some(()),
+                Err(e) => {
+                    self.result = Some(Err(EVMError::StackError(e)));
+                    // Stop.
+                    None
+                }
+            },
+            EXTCODECOPY => match self
+                .stack
+                .pop()
+                .map(Address::from)
+                .and_then(|addr| self.stack.pop().map(|dest_offset| (addr, dest_offset)))
+                .and_then(|(addr, dest_offset)| {
+                    self.stack.pop().map(|offset| (addr, dest_offset, offset))
+                })
+                .and_then(|(addr, dest_offset, offset)| {
+                    self.stack
+                        .pop()
+                        .map(|size| (addr, dest_offset, offset, size))
+                })
+                .map_err(EVMError::StackError)
+                .and_then(|(addr, dest_offset, offset, size)| {
+                    let dest_offset = dest_offset.saturating_to();
+                    let offset = offset.saturating_to();
+                    let size = size.saturating_to();
+                    let code = Code::new(self.env.state().get_account(&addr).code());
+
+                    self.memory
+                        .store(dest_offset, size, code.load(offset, size).as_ref())
+                        .map_err(EVMError::MemoryError)
+                }) {
+                Ok(_) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            EXTCODEHASH => match self
+                .stack
+                .pop()
+                .map(|addr| self.env.state().get_account(&addr.into()).code_hash())
+                .and_then(|hash| self.stack.push(hash))
                 .map_err(EVMError::StackError)
             {
                 Ok(_) => Some(()),
@@ -662,7 +827,11 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .stack
                 .pop()
                 .map_err(EVMError::StackError)
-                .and_then(|offset| self.memory.load_u256(offset).map_err(EVMError::MemoryError))
+                .and_then(|offset| {
+                    self.memory
+                        .load_u256(offset.saturating_to())
+                        .map_err(EVMError::MemoryError)
+                })
                 .and_then(|value| self.stack.push(value).map_err(EVMError::StackError))
             {
                 Ok(_) => Some(()),
@@ -677,8 +846,11 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .pop()
                 .and_then(|offset| self.stack.pop().map(|b| (offset, b)))
                 .map_err(EVMError::StackError)
-                .and_then(|(offset, b)| self.memory.store(offset, b).map_err(EVMError::MemoryError))
-            {
+                .and_then(|(offset, b)| {
+                    self.memory
+                        .store_u256(offset.saturating_to(), b)
+                        .map_err(EVMError::MemoryError)
+                }) {
                 Ok(_) => Some(()),
                 e => {
                     self.result = Some(e);
@@ -692,7 +864,9 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .and_then(|offset| self.stack.pop().map(|b| (offset, b)))
                 .map_err(EVMError::StackError)
                 .and_then(|(offset, b)| {
-                    self.memory.store8(offset, b).map_err(EVMError::MemoryError)
+                    self.memory
+                        .store_u8(offset.saturating_to(), b.saturating_to())
+                        .map_err(EVMError::MemoryError)
                 }) {
                 Ok(_) => Some(()),
                 e => {
