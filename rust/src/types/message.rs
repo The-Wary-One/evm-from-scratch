@@ -21,6 +21,13 @@ where
         value: &'a U256,
         data: &'b Calldata<'a>,
     },
+    Staticcall {
+        caller: &'a Address,
+        target: &'a Address,
+        gas: &'a U256,
+        value: &'a U256,
+        data: &'b Calldata<'a>,
+    },
 }
 
 impl<'a, 'b> Message<'a, 'b>
@@ -52,31 +59,56 @@ where
         }
     }
 
+    pub(crate) fn staticcall(
+        caller: &'a Address,
+        target: &'a Address,
+        gas: &'a U256,
+        value: &'a U256,
+        data: &'b Calldata<'a>,
+    ) -> Self {
+        Self::Staticcall {
+            caller,
+            target,
+            gas,
+            value,
+            data,
+        }
+    }
+
     pub(crate) fn caller(&self) -> &Address {
-        match &self {
-            Message::Call { caller, .. } => caller,
-            Message::Create { caller, .. } => caller,
+        use Message::*;
+        match self {
+            Call { caller, .. } | Staticcall { caller, .. } | Create { caller, .. } => caller,
         }
     }
 
     pub(crate) fn target(&self) -> &Address {
-        match &self {
-            Message::Call { target, .. } => target,
-            Message::Create { .. } => todo!(),
+        use Message::*;
+        match self {
+            Call { target, .. } | Staticcall { target, .. } => target,
+            Create { .. } => todo!(),
         }
     }
 
     pub(crate) fn value(&self) -> &U256 {
-        match &self {
-            Message::Call { value, .. } => &value,
-            Message::Create { value, .. } => &value,
+        use Message::*;
+        match self {
+            Call { value, .. } | Staticcall { value, .. } | Create { value, .. } => &value,
         }
     }
 
     pub(crate) fn data(&self) -> &Calldata {
+        use Message::*;
         match &self {
-            Message::Call { data, .. } => &data,
-            Message::Create { data, .. } => &data,
+            Call { data, .. } | Staticcall { data, .. } | Create { data, .. } => &data,
+        }
+    }
+
+    pub(crate) fn is_staticcall(&self) -> bool {
+        use Message::*;
+        match self {
+            Staticcall { .. } => true,
+            _ => false,
         }
     }
 }

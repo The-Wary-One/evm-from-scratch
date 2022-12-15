@@ -19,6 +19,7 @@ where
     stack: Stack,
     memory: Memory,
     code: Code,
+    logs: Vec<Log>,
     result: Option<Result<()>>,
 }
 
@@ -37,6 +38,7 @@ where
                     stack: Stack::new(),
                     memory: Memory::new(),
                     code,
+                    logs: vec![],
                     result: None,
                 }
             }
@@ -48,6 +50,7 @@ where
 #[derive(Error, Debug)]
 pub enum EVMError {
     Revert(Vec<u8>),
+    StateModificationDisallowed,
     #[error(transparent)]
     StackError(#[from] StackError),
     #[error(transparent)]
@@ -60,6 +63,9 @@ impl<'a> Display for EVMError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EVMError::Revert(bytes) => write!(f, "EVM reverted: {:?}", bytes),
+            EVMError::StateModificationDisallowed => {
+                write!(f, "Cannot modify state in a staticcall")
+            }
             EVMError::StackError(e) => e.fmt(f),
             EVMError::CodeError(e) => e.fmt(f),
             EVMError::MemoryError(e) => e.fmt(f),
@@ -505,10 +511,11 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                 }
             },
             ADDRESS => match self.message {
-                Message::Call { target, .. } => {
+                Message::Create { .. } => todo!(),
+                _ => {
                     match self
                         .stack
-                        .push(<U256 as From<&Address>>::from(target))
+                        .push(<U256 as From<&Address>>::from(self.message.target()))
                         .map_err(EVMError::StackError)
                     {
                         Ok(()) => Some(()),
@@ -519,7 +526,6 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                         }
                     }
                 }
-                Message::Create { .. } => todo!(),
             },
             BALANCE => match self
                 .stack
@@ -920,20 +926,27 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                     None
                 }
             },
-            SSTORE => match self
-                .stack
-                .pop()
-                .and_then(|key| self.stack.pop().map(|value| (key, value)))
-                .map_err(EVMError::StackError)
-                .map(|(key, value)| {
-                    self.env
-                        .state_mut()
-                        .update_account(self.message.target(), |mut account| {
-                            account.store(key, value);
-                            Ok(account)
-                        })
-                        .expect("safe")
-                }) {
+            SSTORE => match (if self.message.is_staticcall() {
+                Err(EVMError::StateModificationDisallowed)
+            } else {
+                Ok(())
+            })
+            .and_then(|_| self.stack.pop().map_err(EVMError::StackError))
+            .and_then(|key| {
+                self.stack
+                    .pop()
+                    .map_err(EVMError::StackError)
+                    .map(|value| (key, value))
+            })
+            .map(|(key, value)| {
+                self.env
+                    .state_mut()
+                    .update_account(self.message.target(), |mut account| {
+                        account.store(key, value);
+                        Ok(account)
+                    })
+                    .expect("safe")
+            }) {
                 Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
@@ -1022,6 +1035,68 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                     None
                 }
             },
+            LOG(n) => match (if self.message.is_staticcall() {
+                Err(EVMError::StateModificationDisallowed)
+            } else {
+                Ok(())
+            })
+            .and_then(|_| self.stack.pop().map_err(EVMError::StackError))
+            .and_then(|offset| {
+                self.stack
+                    .pop()
+                    .map(|size| {
+                        (
+                            offset.saturating_to::<usize>(),
+                            size.saturating_to::<usize>(),
+                        )
+                    })
+                    .map_err(EVMError::StackError)
+            })
+            .and_then(|(offset, size)| {
+                let address = self.message.target().clone();
+                let data = self
+                    .memory
+                    .load(offset, size)
+                    .map_err(EVMError::MemoryError)
+                    .map(|b| b.to_vec())?;
+
+                let res = match n {
+                    0 => Ok(Log::log0(address, data)),
+                    1 => {
+                        let topic1 = self.stack.pop()?;
+                        Ok(Log::log1(address, [topic1], data))
+                    }
+                    2 => {
+                        let topic1 = self.stack.pop()?;
+                        let topic2 = self.stack.pop()?;
+                        Ok(Log::log2(address, [topic1, topic2], data))
+                    }
+                    3 => {
+                        let topic1 = self.stack.pop()?;
+                        let topic2 = self.stack.pop()?;
+                        let topic3 = self.stack.pop()?;
+                        Ok(Log::log3(address, [topic1, topic2, topic3], data))
+                    }
+                    _ => {
+                        let topic1 = self.stack.pop()?;
+                        let topic2 = self.stack.pop()?;
+                        let topic3 = self.stack.pop()?;
+                        let topic4 = self.stack.pop()?;
+                        Ok(Log::log4(address, [topic1, topic2, topic3, topic4], data))
+                    }
+                };
+
+                let log = res.map_err(EVMError::StackError)?;
+                self.logs.push(log);
+                Ok(())
+            }) {
+                Ok(()) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
             INVALID => {
                 self.result = Some(Err(EVMError::Revert(vec![])));
                 // Stop.
@@ -1035,6 +1110,27 @@ impl<'a, 'b> EVM<'a, 'b> {
     pub fn execute(mut self) -> EVMResult {
         log::trace!("execute(): execute the bytecode");
 
+        // Send Eth.
+        if *self.message.value() != U256::ZERO {
+            match self.message {
+                // Check if it is a staticcall
+                Message::Staticcall { .. } => {
+                    self.result = Some(Err(EVMError::StateModificationDisallowed));
+                    return self.into();
+                }
+                _ => {
+                    self.env
+                        .state_mut()
+                        .send_eth(
+                            self.message.caller(),
+                            self.message.target(),
+                            self.message.value(),
+                        )
+                        .expect("not handled");
+                }
+            }
+        }
+
         let iter = &mut self.into_iter();
         while let Some(_) = iter.next() {}
 
@@ -1047,15 +1143,17 @@ impl<'a, 'b> EVM<'a, 'b> {
 pub(crate) struct EVMResult {
     stack: StackResult,
     memory: MemoryResult,
-    result: Option<Result<()>>,
+    logs: Vec<LogResult>,
+    result: Result<()>,
 }
 
 impl<'a, 'b> From<EVM<'a, 'b>> for EVMResult {
-    fn from(env: EVM<'a, 'b>) -> Self {
+    fn from(evm: EVM<'a, 'b>) -> Self {
         Self {
-            stack: env.stack.into(),
-            memory: env.memory.into(),
-            result: env.result,
+            stack: evm.stack.into(),
+            memory: evm.memory.into(),
+            logs: evm.logs.into_iter().map(From::from).collect(),
+            result: evm.result.expect("safe"),
         }
     }
 }
@@ -1065,7 +1163,11 @@ impl EVMResult {
         &self.stack
     }
 
+    pub fn logs(&self) -> &Vec<LogResult> {
+        &self.logs
+    }
+
     pub fn result(&self) -> &Result<()> {
-        &self.result.as_ref().expect("safe")
+        &self.result
     }
 }

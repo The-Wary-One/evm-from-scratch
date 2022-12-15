@@ -4,10 +4,12 @@ mod bytes;
 mod calldata;
 mod environment;
 mod int256;
+mod log;
 mod message;
 mod state;
 mod transaction;
 
+pub use self::log::*;
 pub use account::*;
 pub use address::*;
 pub use bytes::*;

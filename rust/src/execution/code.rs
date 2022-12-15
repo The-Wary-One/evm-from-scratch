@@ -75,6 +75,7 @@ pub(super) enum Opcode {
     PUSH(U256),
     DUP(usize),
     SWAP(usize),
+    LOG(usize),
     INVALID,
 }
 
@@ -197,23 +198,28 @@ impl Code {
                 0x5A => GAS,
                 0x5B => JUMPDEST,
                 0x60..=0x7F => {
-                    // 1 <= len <= 32
-                    let len: usize = (byte - 0x5F).into();
+                    // 1 <= n <= 32
+                    let n: usize = (byte - 0x5F).into();
                     // Check for bad bytecode length.
-                    let bytes = &bytecode[counter..std::cmp::min(counter + len, bytecode.len())];
+                    let bytes = &bytecode[counter..std::cmp::min(counter + n, bytecode.len())];
                     // The end of the number in the bytecode.
-                    counter += len;
+                    counter += n;
                     PUSH(U256::try_from_be_slice(&bytes).expect("safe"))
                 }
                 0x80..=0x8F => {
-                    // 1 <= len <= 16
+                    // 1 <= n <= 16
                     let n: usize = (byte - 0x7F).into();
                     DUP(n)
                 }
                 0x90..=0x9F => {
-                    // 1 <= len <= 16
+                    // 1 <= n <= 16
                     let n: usize = (byte - 0x8F).into();
                     SWAP(n)
+                }
+                0xA0..=0xA4 => {
+                    // 0 <= n <= 4
+                    let n: usize = (byte - 0xA0).into();
+                    LOG(n)
                 }
                 0xFE | _ => INVALID,
             };

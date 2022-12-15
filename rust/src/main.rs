@@ -13,7 +13,7 @@
  * to Rust, implement EVM in another programming language first.
  */
 
-use evm::types::{Account, Address, Environment, State, Transaction};
+use evm::types::{Account, Address, Environment, LogResult, State, Transaction};
 use ruint::{aliases::U256, uint};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
@@ -80,14 +80,6 @@ struct Code {
     bin: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Expect {
-    stack: Option<Vec<String>>,
-    success: bool,
-    // #[serde(rename = "return")]
-    // ret: Option<String>,
-}
-
 fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     T: Default + Deserialize<'de>,
@@ -95,6 +87,17 @@ where
 {
     let opt = Option::deserialize(deserializer)?;
     Ok(opt.unwrap_or_default())
+}
+
+#[derive(Debug, Deserialize)]
+struct Expect {
+    #[serde(default)]
+    stack: Vec<U256>,
+    #[serde(default)]
+    logs: Vec<LogResult>,
+    success: bool,
+    // #[serde(rename = "return")]
+    // ret: Option<String>,
 }
 
 fn main() {
@@ -172,33 +175,25 @@ fn main() {
 
         let result = transaction.process(&mut env);
 
-        let mut expected_stack: Vec<U256> = Vec::new();
-        if let Some(ref stacks) = test.expect.stack {
-            for value in stacks {
-                expected_stack
-                    .push(U256::from_str_radix(&value.strip_prefix("0x").unwrap(), 16).unwrap());
-            }
-        }
+        let is_expected_status = result.success == test.expect.success;
 
-        let mut matching = result.stack.len() == expected_stack.len();
-        if matching {
-            for i in 0..result.stack.len() {
-                if result.stack[i] != expected_stack[i] {
-                    matching = false;
-                    break;
-                }
-            }
-        }
+        let is_expected_stack = test.expect.stack == result.stack;
+        let is_expected_logs = test.expect.logs == result.logs;
 
-        matching = matching && result.success == test.expect.success;
+        let test_passed = is_expected_status && is_expected_stack && is_expected_logs;
 
-        if !matching {
+        if !test_passed {
             println!("Instructions: \n{}\n", test.code.asm);
 
             println!("Expected success: {:?}", test.expect.success);
             println!("Expected stack: [");
-            for v in expected_stack {
+            for v in &test.expect.stack {
                 println!("  {:#X},", v);
+            }
+            println!("]\n");
+            println!("Expected logs: [");
+            for v in &test.expect.logs {
+                println!("  {:?},", v);
             }
             println!("]\n");
 
@@ -206,6 +201,11 @@ fn main() {
             println!("Actual stack: [");
             for v in result.stack {
                 println!("  {:#X},", v);
+            }
+            println!("]\n");
+            println!("Actual logs: [");
+            for v in result.logs {
+                println!("  {:?},", v);
             }
             println!("]\n");
 
