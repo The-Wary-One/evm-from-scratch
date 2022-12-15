@@ -4,29 +4,35 @@ use ruint::aliases::U256;
 
 #[derive(Debug)]
 /// Items that are used by contract creation or message call.
-pub enum Message<'a> {
+pub enum Message<'a, 'b>
+where
+    'a: 'b,
+{
     Create {
         caller: &'a Address,
         gas: &'a U256,
         value: &'a U256,
-        data: &'a Calldata<'a>,
+        data: &'b Calldata<'a>,
     },
     Call {
         caller: &'a Address,
         target: &'a Address,
         gas: &'a U256,
         value: &'a U256,
-        data: &'a Calldata<'a>,
+        data: &'b Calldata<'a>,
     },
 }
 
-impl<'a> Message<'a> {
+impl<'a, 'b> Message<'a, 'b>
+where
+    'a: 'b,
+{
     pub(crate) fn new(
         caller: &'a Address,
         target: &'a Option<Address>,
         gas: &'a U256,
         value: &'a U256,
-        data: &'a Calldata<'a>,
+        data: &'b Calldata<'a>,
     ) -> Self {
         if let Some(target) = target {
             Self::Call {
@@ -50,6 +56,13 @@ impl<'a> Message<'a> {
         match &self {
             Message::Call { caller, .. } => caller,
             Message::Create { caller, .. } => caller,
+        }
+    }
+
+    pub(crate) fn target(&self) -> &Address {
+        match &self {
+            Message::Call { target, .. } => target,
+            Message::Create { .. } => todo!(),
         }
     }
 

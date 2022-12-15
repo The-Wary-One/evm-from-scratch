@@ -11,6 +11,7 @@ pub struct State {
 
 impl<'a> State {
     pub fn new(accounts: HashMap<Address, Account>) -> Self {
+        log::trace!("new(): accounts={:?}", accounts);
         Self { accounts }
     }
 
@@ -18,7 +19,7 @@ impl<'a> State {
         self.accounts.get(addr).unwrap_or_else(|| &EMPTY_ACCOUNT)
     }
 
-    fn update_account(
+    pub(crate) fn update_account(
         &mut self,
         addr: &Address,
         f: impl FnOnce(Account) -> Result<Account>,
@@ -29,6 +30,13 @@ impl<'a> State {
     }
 
     pub(crate) fn send_eth(&mut self, from: &Address, to: &Address, amount: &U256) -> Result<()> {
+        log::trace!(
+            "send_eth(): from={:?}, to={:?}, amount={:02X?}",
+            from,
+            to,
+            amount
+        );
+
         self.update_account(from, |from_account| {
             from_account
                 .decrease_balance(amount)

@@ -14,7 +14,7 @@ pub struct Environment<'a> {
     gas_price: &'a U256,
     time: &'a U256,
     difficulty: &'a U256,
-    state: &'a State,
+    state: State,
     chain_id: &'a U256,
 }
 
@@ -29,7 +29,7 @@ impl<'a> Environment<'a> {
         gas_price: &'a U256,
         time: &'a U256,
         difficulty: &'a U256,
-        state: &'a State,
+        state: State,
         chain_id: &'a U256,
     ) -> Self {
         Self {
@@ -88,6 +88,10 @@ impl<'a> Environment<'a> {
 
     pub fn state(&self) -> &State {
         &self.state
+    }
+
+    pub fn state_mut(&mut self) -> &mut State {
+        &mut self.state
     }
 
     pub fn chain_id(&self) -> &U256 {

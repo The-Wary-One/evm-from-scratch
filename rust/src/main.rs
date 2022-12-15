@@ -146,12 +146,17 @@ fn main() {
         accounts.insert(from, Account::new(Some(test.tx.value), None));
         // Code to execute should be the to account code.
         accounts.insert(
-            to.expect("safe"),
-            Account::new(None, Some(test.code.bin.clone())),
+            to.clone().expect("safe"),
+            Account::new(
+                accounts
+                    .get(&to.expect("safe"))
+                    .map(|a| a.balance().clone()),
+                Some(test.code.bin.clone()),
+            ),
         );
         let state = State::new(accounts);
         // Setup the chain environment.
-        let env = Environment::new(
+        let mut env = Environment::new(
             &caller,
             &[],
             &test.block.coinbase,
@@ -161,16 +166,15 @@ fn main() {
             &transaction.gas_price(),
             &test.block.timestamp,
             &test.block.difficulty,
-            &state,
+            state,
             &test.block.chainid,
         );
 
-        let result = transaction.process(&env);
+        let result = transaction.process(&mut env);
 
         let mut expected_stack: Vec<U256> = Vec::new();
         if let Some(ref stacks) = test.expect.stack {
             for value in stacks {
-                log::debug!("value: {:?}", value);
                 expected_stack
                     .push(U256::from_str_radix(&value.strip_prefix("0x").unwrap(), 16).unwrap());
             }

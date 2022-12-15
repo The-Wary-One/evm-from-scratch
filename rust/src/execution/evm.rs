@@ -10,20 +10,27 @@ use crate::types::*;
 
 #[derive(Debug)]
 /// The internal state of the virtual machine.
-pub(crate) struct EVM<'a> {
-    env: &'a Environment<'a>,
-    message: &'a Message<'a>,
+pub(crate) struct EVM<'a, 'b>
+where
+    'a: 'b,
+{
+    env: &'b mut Environment<'a>,
+    message: &'b Message<'a, 'b>,
     stack: Stack,
     memory: Memory,
-    code: Code<'a>,
-    result: Option<Result<'a, ()>>,
+    code: Code,
+    result: Option<Result<()>>,
 }
 
-impl<'a> EVM<'a> {
-    pub fn new(env: &'a Environment<'a>, message: &'a Message<'a>) -> EVM<'a> {
+impl<'a, 'b> EVM<'a, 'b>
+where
+    'a: 'b,
+{
+    pub fn new(env: &'b mut Environment<'a>, message: &'b Message<'a, 'b>) -> EVM<'a, 'b> {
         match message {
             Message::Call { target, .. } => {
-                let code = Code::new(env.state().get_account(target).code());
+                let code = Code::new(env.state().get_account(target).code().clone());
+
                 Self {
                     env,
                     message,
@@ -39,8 +46,8 @@ impl<'a> EVM<'a> {
 }
 
 #[derive(Error, Debug)]
-pub enum EVMError<'a> {
-    Revert(&'a [u8]),
+pub enum EVMError {
+    Revert(Vec<u8>),
     #[error(transparent)]
     StackError(#[from] StackError),
     #[error(transparent)]
@@ -49,7 +56,7 @@ pub enum EVMError<'a> {
     MemoryError(#[from] MemoryError),
 }
 
-impl<'a> Display for EVMError<'a> {
+impl<'a> Display for EVMError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EVMError::Revert(bytes) => write!(f, "EVM reverted: {:?}", bytes),
@@ -60,9 +67,9 @@ impl<'a> Display for EVMError<'a> {
     }
 }
 
-type Result<'a, T> = std::result::Result<T, EVMError<'a>>;
+type Result<T> = std::result::Result<T, EVMError>;
 
-impl<'a> Iterator for &mut EVM<'a> {
+impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
     type Item = ();
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -86,7 +93,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -104,7 +111,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -122,7 +129,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -139,7 +146,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                     )
                     .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -156,7 +163,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|c| self.stack.push(c.to_raw_u256()))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -173,7 +180,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 )
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -192,7 +199,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                     .and_then(|c| self.stack.push(c.to_raw_u256()));
 
                 match res {
-                    Ok(_) => Some(()),
+                    Ok(()) => Some(()),
                     Err(e) => {
                         self.result = Some(Err(EVMError::StackError(e)));
                         // Stop.
@@ -208,7 +215,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b, n)| a.add_mod(b, n))
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -223,7 +230,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b, n)| a.mul_mod(b, n))
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -240,7 +247,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -257,7 +264,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|c| self.stack.push(c.to_raw_u256()))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -271,7 +278,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b)| a < b)
                 .and_then(|c| self.stack.push(U256::from(c as u8)))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -285,7 +292,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b)| a > b)
                 .and_then(|c| self.stack.push(c as u8))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -301,7 +308,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                          Int256::from_raw_u256(a) < Int256::from_raw_u256(b))
                 .and_then(|c| self.stack.push(c as u8))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -317,7 +324,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                          Int256::from_raw_u256(a) > Int256::from_raw_u256(b))
                 .and_then(|c| self.stack.push(c as u8))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -331,7 +338,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b)| a == b)
                 .and_then(|c| self.stack.push(c as u8))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -345,7 +352,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b)| a & b)
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -359,7 +366,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b)| a | b)
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -373,7 +380,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(a, b)| a ^ b)
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -386,7 +393,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|a| a == U256::ZERO)
                 .and_then(|c| self.stack.push(c as u8))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -399,7 +406,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|a| !a)
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -419,7 +426,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -433,7 +440,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(shift, value)| value << shift.saturating_to::<usize>())
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -447,7 +454,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|(shift, value)| value >> shift.saturating_to::<usize>())
                 .and_then(|c| self.stack.push(c))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -463,7 +470,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                     Int256::from_raw_u256(value) >> shift.into())
                 .and_then(|c| self.stack.push(c.to_raw_u256()))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -490,7 +497,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|hash| U256::try_from_be_slice(&hash[..]).expect("safe"))
                 .and_then(|c| self.stack.push(c).map_err(EVMError::StackError))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -504,7 +511,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                         .push(<U256 as From<&Address>>::from(target))
                         .map_err(EVMError::StackError)
                     {
-                        Ok(_) => Some(()),
+                        Ok(()) => Some(()),
                         e => {
                             self.result = Some(e);
                             // Stop.
@@ -521,7 +528,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .and_then(|balance| self.stack.push(*balance))
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -533,7 +540,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(<U256 as From<&Address>>::from(self.env.caller()))
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -545,7 +552,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(<U256 as From<&Address>>::from(self.message.caller()))
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -557,7 +564,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.message.value())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -571,7 +578,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .and_then(|data| self.stack.push(U256::from_be_bytes(data)))
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -583,7 +590,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(self.message.data().size())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -611,7 +618,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                         )
                         .map_err(EVMError::MemoryError)
                 }) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -619,7 +626,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
             },
             CODESIZE => match self.stack.push(self.code.size()) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -643,7 +650,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                         .store(dest_offset, size, self.code.load(offset, size).as_ref())
                         .map_err(EVMError::MemoryError)
                 }) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -655,7 +662,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.env.gas_price())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -666,7 +673,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 self.stack
                     .push(self.env.state().get_account(&addr).code().len())
             }) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -697,7 +704,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                         .store(dest_offset, size, code.load(offset, size).as_ref())
                         .map_err(EVMError::MemoryError)
                 }) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -711,7 +718,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .and_then(|hash| self.stack.push(hash))
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -724,7 +731,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map(|number| self.env.block_hash(number.saturating_to::<usize>()))
                 .and_then(|c| self.stack.push(c.clone()))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -736,7 +743,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(<U256 as From<&Address>>::from(self.env.coinbase()))
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -748,7 +755,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.env.time())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -760,7 +767,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.env.number())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -772,7 +779,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.env.difficulty())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -784,7 +791,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.env.gas_limit())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -796,7 +803,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.env.chain_id())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -808,15 +815,33 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .push(*self.env.base_fee_per_gas())
                 .map_err(EVMError::StackError)
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
                     None
                 }
             },
-            POP => match self.stack.pop() {
-                Ok(_) => Some(()),
+            SELFBALANCE => match self
+                .stack
+                .push(
+                    self.env
+                        .state()
+                        .get_account(self.message.target())
+                        .balance()
+                        .clone(),
+                )
+                .map_err(EVMError::StackError)
+            {
+                Ok(()) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            POP => match self.stack.pop().map(|_| ()) {
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -834,7 +859,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 })
                 .and_then(|value| self.stack.push(value).map_err(EVMError::StackError))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -851,7 +876,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                         .store_u256(offset.saturating_to(), b)
                         .map_err(EVMError::MemoryError)
                 }) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -868,7 +893,48 @@ impl<'a> Iterator for &mut EVM<'a> {
                         .store_u8(offset.saturating_to(), b.saturating_to())
                         .map_err(EVMError::MemoryError)
                 }) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            SLOAD => match self
+                .stack
+                .pop()
+                .map(|key| {
+                    self.env
+                        .state()
+                        .get_account(self.message.target())
+                        .load(&key)
+                        .clone()
+                })
+                .and_then(|v| self.stack.push(v))
+                .map_err(EVMError::StackError)
+            {
+                Ok(()) => Some(()),
+                e => {
+                    self.result = Some(e);
+                    // Stop.
+                    None
+                }
+            },
+            SSTORE => match self
+                .stack
+                .pop()
+                .and_then(|key| self.stack.pop().map(|value| (key, value)))
+                .map_err(EVMError::StackError)
+                .map(|(key, value)| {
+                    self.env
+                        .state_mut()
+                        .update_account(self.message.target(), |mut account| {
+                            account.store(key, value);
+                            Ok(account)
+                        })
+                        .expect("safe")
+                }) {
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -881,7 +947,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 .map_err(EVMError::StackError)
                 .and_then(|counter| self.code.jump_to(counter).map_err(EVMError::CodeError))
             {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -900,7 +966,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                         Ok(())
                     }
                 }) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 e => {
                     self.result = Some(e);
                     // Stop.
@@ -908,7 +974,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
             },
             PC => match self.stack.push(self.code.pc() - 1) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -916,7 +982,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
             },
             MSIZE => match self.stack.push(self.memory.size()) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -924,7 +990,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
             },
             GAS => match self.stack.push(U256::MAX) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -933,7 +999,7 @@ impl<'a> Iterator for &mut EVM<'a> {
             },
             JUMPDEST => Some(()),
             PUSH(n) => match self.stack.push(n) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -941,7 +1007,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
             },
             DUP(n) => match self.stack.dup(n) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -949,7 +1015,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
             },
             SWAP(n) => match self.stack.swap(n) {
-                Ok(_) => Some(()),
+                Ok(()) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(EVMError::StackError(e)));
                     // Stop.
@@ -957,7 +1023,7 @@ impl<'a> Iterator for &mut EVM<'a> {
                 }
             },
             INVALID => {
-                self.result = Some(Err(EVMError::Revert(&[])));
+                self.result = Some(Err(EVMError::Revert(vec![])));
                 // Stop.
                 None
             }
@@ -965,8 +1031,8 @@ impl<'a> Iterator for &mut EVM<'a> {
     }
 }
 
-impl<'a> EVM<'a> {
-    pub fn execute(mut self) -> EVMResult<'a> {
+impl<'a, 'b> EVM<'a, 'b> {
+    pub fn execute(mut self) -> EVMResult {
         log::trace!("execute(): execute the bytecode");
 
         let iter = &mut self.into_iter();
@@ -978,14 +1044,14 @@ impl<'a> EVM<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct EVMResult<'a> {
+pub(crate) struct EVMResult {
     stack: StackResult,
     memory: MemoryResult,
-    result: Option<Result<'a, ()>>,
+    result: Option<Result<()>>,
 }
 
-impl<'a> From<EVM<'a>> for EVMResult<'a> {
-    fn from(env: EVM<'a>) -> Self {
+impl<'a, 'b> From<EVM<'a, 'b>> for EVMResult {
+    fn from(env: EVM<'a, 'b>) -> Self {
         Self {
             stack: env.stack.into(),
             memory: env.memory.into(),
@@ -994,7 +1060,7 @@ impl<'a> From<EVM<'a>> for EVMResult<'a> {
     }
 }
 
-impl<'a> EVMResult<'a> {
+impl EVMResult {
     pub fn stack(&self) -> &StackResult {
         &self.stack
     }

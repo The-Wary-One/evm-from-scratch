@@ -2,8 +2,8 @@ use ruint::aliases::U256;
 use thiserror::Error;
 
 #[derive(Debug)]
-pub(super) struct Code<'a> {
-    bytecode: &'a [u8],
+pub(super) struct Code {
+    bytecode: Vec<u8>,
     opcodes: Vec<Option<Opcode>>,
     pc: usize,
 }
@@ -59,10 +59,13 @@ pub(super) enum Opcode {
     GASLIMIT,
     CHAINID,
     BASEFEE,
+    SELFBALANCE,
     POP,
     MLOAD,
     MSTORE,
     MSTORE8,
+    SLOAD,
+    SSTORE,
     JUMP,
     JUMPI,
     PC,
@@ -75,10 +78,10 @@ pub(super) enum Opcode {
     INVALID,
 }
 
-impl<'a> Code<'a> {
-    pub fn new(bytecode: &'a [u8]) -> Code<'a> {
+impl Code {
+    pub fn new(bytecode: &[u8]) -> Code {
         Code {
-            bytecode,
+            bytecode: bytecode.to_owned(),
             opcodes: Code::opcodes(bytecode),
             pc: 0,
         }
@@ -121,7 +124,7 @@ impl<'a> Code<'a> {
         bytes
     }
 
-    fn opcodes(bytecode: &'a [u8]) -> Vec<Option<Opcode>> {
+    fn opcodes(bytecode: &[u8]) -> Vec<Option<Opcode>> {
         let mut opcodes = vec![None; bytecode.len()];
         let mut pc = 0;
 
@@ -179,11 +182,14 @@ impl<'a> Code<'a> {
                 0x44 => DIFFICULTY,
                 0x45 => GASLIMIT,
                 0x46 => CHAINID,
+                0x47 => SELFBALANCE,
                 0x48 => BASEFEE,
                 0x50 => POP,
                 0x51 => MLOAD,
                 0x52 => MSTORE,
                 0x53 => MSTORE8,
+                0x54 => SLOAD,
+                0x55 => SSTORE,
                 0x56 => JUMP,
                 0x57 => JUMPI,
                 0x58 => PC,
@@ -235,7 +241,7 @@ impl std::fmt::Display for CodeError {
     }
 }
 
-impl<'a> Iterator for Code<'a> {
+impl Iterator for Code {
     type Item = Opcode;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -272,14 +278,14 @@ impl<'a> Iterator for Code<'a> {
 }
 
 #[derive(Debug)]
-pub(super) struct CodeResult<'a> {
-    bytecode: &'a [u8],
+pub(super) struct CodeResult {
+    bytecode: Vec<u8>,
     opcodes: Vec<Option<Opcode>>,
     pc: usize,
 }
 
-impl<'a> From<Code<'a>> for CodeResult<'a> {
-    fn from(code: Code<'a>) -> Self {
+impl From<Code> for CodeResult {
+    fn from(code: Code) -> Self {
         Self {
             bytecode: code.bytecode,
             opcodes: code.opcodes,

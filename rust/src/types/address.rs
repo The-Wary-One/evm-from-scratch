@@ -1,7 +1,9 @@
+use std::fmt::Debug;
+
 use ruint::aliases::{U160, U256};
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(from = "U160")]
 pub struct Address(#[serde(default)] [u8; 0x14]);
 
@@ -33,5 +35,15 @@ impl From<&Address> for U256 {
 impl Default for Address {
     fn default() -> Self {
         [0x00; 0x14].into()
+    }
+}
+
+impl Debug for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Address({:02X?})",
+            U160::try_from_be_slice(&self.0[..]).expect("safe")
+        )
     }
 }
