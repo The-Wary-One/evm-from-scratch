@@ -10,12 +10,13 @@ use crate::types::*;
 
 #[derive(Debug)]
 /// The internal state of the virtual machine.
-pub(crate) struct EVM<'a, 'b>
+pub(crate) struct EVM<'a, 'b, 'c>
 where
-    'a: 'b,
+    'a: 'c,
+    'b: 'c,
 {
-    env: &'b mut Environment<'a>,
-    message: &'b Message<'a, 'b>,
+    env: Environment<'a>,
+    message: &'c Message<'b, 'c>,
     stack: Stack,
     memory: Memory,
     code: Code,
@@ -23,17 +24,18 @@ where
     result: Option<Result<(U256, U256)>>,
 }
 
-impl<'a, 'b> EVM<'a, 'b>
+impl<'a, 'b, 'c> EVM<'a, 'b, 'c>
 where
-    'a: 'b,
+    'a: 'c,
+    'b: 'c,
 {
-    pub fn new(env: &'b mut Environment<'a>, message: &'b Message<'a, 'b>) -> EVM<'a, 'b> {
+    pub fn new(env: &'c Environment<'a>, message: &'c Message<'b, 'c>) -> EVM<'a, 'b, 'c> {
         match message {
             Message::Call { target, .. } => {
                 let code = Code::new(env.state().get_account(target).code().clone());
 
                 Self {
-                    env,
+                    env: env.clone(),
                     message,
                     stack: Stack::new(),
                     memory: Memory::new(),
@@ -75,7 +77,7 @@ impl<'a> Display for EVMError {
 
 type Result<T> = std::result::Result<T, EVMError>;
 
-impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
+impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
     type Item = ();
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -488,16 +490,14 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                 .pop()
                 .and_then(|offset| self.stack.pop().map(|size| (offset, size)))
                 .map_err(EVMError::StackError)
-                .and_then(|(offset, size)| {
+                .map(|(offset, size)| {
                     let offset = offset.saturating_to();
                     let size = size.saturating_to();
-                    self.memory
-                        .load(offset, size)
-                        .map_err(EVMError::MemoryError)
+                    self.memory.load(offset, size)
                 })
                 .map(|value| {
                     let mut hasher = sha3::Keccak256::new();
-                    hasher.update(value);
+                    hasher.update(value.to_vec());
                     hasher.finalize()
                 })
                 .map(|hash| U256::try_from_be_slice(&hash[..]).expect("safe"))
@@ -611,18 +611,16 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                     self.stack.pop().map(|size| (dest_offset, offset, size))
                 })
                 .map_err(EVMError::StackError)
-                .and_then(|(dest_offset, offset, size)| {
+                .map(|(dest_offset, offset, size)| {
                     let dest_offset = dest_offset.saturating_to::<usize>();
                     let offset = offset.saturating_to::<usize>();
                     let size = size.saturating_to::<usize>();
 
-                    self.memory
-                        .store(
-                            dest_offset,
-                            size,
-                            self.message.data().load(offset, size).as_ref(),
-                        )
-                        .map_err(EVMError::MemoryError)
+                    self.memory.store(
+                        dest_offset,
+                        size,
+                        self.message.data().load(offset, size).as_ref(),
+                    )
                 }) {
                 Ok(_) => Some(()),
                 Err(e) => {
@@ -647,14 +645,13 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                     self.stack.pop().map(|size| (dest_offset, offset, size))
                 })
                 .map_err(EVMError::StackError)
-                .and_then(|(dest_offset, offset, size)| {
+                .map(|(dest_offset, offset, size)| {
                     let dest_offset = dest_offset.saturating_to();
                     let offset = offset.saturating_to();
                     let size = size.saturating_to();
 
                     self.memory
                         .store(dest_offset, size, self.code.load(offset, size).as_ref())
-                        .map_err(EVMError::MemoryError)
                 }) {
                 Ok(_) => Some(()),
                 Err(e) => {
@@ -700,7 +697,7 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                         .map(|size| (addr, dest_offset, offset, size))
                 })
                 .map_err(EVMError::StackError)
-                .and_then(|(addr, dest_offset, offset, size)| {
+                .map(|(addr, dest_offset, offset, size)| {
                     let dest_offset = dest_offset.saturating_to();
                     let offset = offset.saturating_to();
                     let size = size.saturating_to();
@@ -708,7 +705,6 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
 
                     self.memory
                         .store(dest_offset, size, code.load(offset, size).as_ref())
-                        .map_err(EVMError::MemoryError)
                 }) {
                 Ok(_) => Some(()),
                 Err(e) => {
@@ -857,13 +853,9 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
             MLOAD => match self
                 .stack
                 .pop()
+                .map(|offset| self.memory.load_u256(offset.saturating_to()))
+                .and_then(|value| self.stack.push(value))
                 .map_err(EVMError::StackError)
-                .and_then(|offset| {
-                    self.memory
-                        .load_u256(offset.saturating_to())
-                        .map_err(EVMError::MemoryError)
-                })
-                .and_then(|value| self.stack.push(value).map_err(EVMError::StackError))
             {
                 Ok(_) => Some(()),
                 Err(e) => {
@@ -877,11 +869,8 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                 .pop()
                 .and_then(|offset| self.stack.pop().map(|b| (offset, b)))
                 .map_err(EVMError::StackError)
-                .and_then(|(offset, b)| {
-                    self.memory
-                        .store_u256(offset.saturating_to(), b)
-                        .map_err(EVMError::MemoryError)
-                }) {
+                .map(|(offset, b)| self.memory.store_u256(offset.saturating_to(), b))
+            {
                 Ok(_) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(e));
@@ -894,10 +883,9 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                 .pop()
                 .and_then(|offset| self.stack.pop().map(|b| (offset, b)))
                 .map_err(EVMError::StackError)
-                .and_then(|(offset, b)| {
+                .map(|(offset, b)| {
                     self.memory
                         .store_u8(offset.saturating_to(), b.saturating_to())
-                        .map_err(EVMError::MemoryError)
                 }) {
                 Ok(_) => Some(()),
                 Err(e) => {
@@ -1054,11 +1042,7 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
             })
             .and_then(|(offset, size)| {
                 let address = self.message.target().clone();
-                let data = self
-                    .memory
-                    .load(offset, size)
-                    .map_err(EVMError::MemoryError)
-                    .map(|b| b.to_vec())?;
+                let data = self.memory.load(offset, size).to_vec();
 
                 let res = match n {
                     0 => Ok(Log::log0(address, data)),
@@ -1090,6 +1074,92 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
                 self.logs.push(log);
                 Ok(())
             }) {
+                Ok(_) => Some(()),
+                Err(e) => {
+                    self.result = Some(Err(e));
+                    // Stop.
+                    None
+                }
+            },
+            CALL => match (if self.message.is_staticcall() {
+                Err(EVMError::StateModificationDisallowed)
+            } else {
+                Ok(())
+            })
+            .and_then(|_| {
+                let args = {
+                    Ok((
+                        self.stack.pop()?,
+                        self.stack.pop()?,
+                        self.stack.pop()?,
+                        self.stack.pop()?,
+                        self.stack.pop()?,
+                        self.stack.pop()?,
+                        self.stack.pop()?,
+                    ))
+                };
+                let (gas, address, value, args_offset, args_size, ret_offset, ret_size) =
+                    args.map_err(EVMError::StackError)?;
+                let target = address.into();
+                let args_offset = args_offset.saturating_to();
+                let args_size = args_size.saturating_to();
+                let ret_offset = ret_offset.saturating_to();
+                let ret_size = ret_size.saturating_to();
+
+                // Instanciate a new EVM.
+                let bytes = self.memory.load(args_offset, args_size);
+                let data = Calldata::new(&bytes[..]);
+                let message = Message::call(self.message.target(), &target, &gas, &value, &data);
+                let evm = EVM::new(&self.env, &message);
+                let result = EVM::execute(evm);
+
+                match result {
+                    // Call succeded.
+                    EVMResult {
+                        memory,
+                        logs,
+                        result: Ok((offset, size)),
+                        ..
+                    } => {
+                        // Copy the returned data to memory.
+                        {
+                            let bytes = memory.load(offset.saturating_to(), size.saturating_to());
+                            self.memory
+                                .store(ret_offset, ret_size, bytes.to_vec().as_ref());
+                            Ok(())
+                        }
+                        .map_err(EVMError::MemoryError)?;
+                        // Add result logs to logs.
+                        self.logs
+                            .append(&mut logs.into_iter().map(|l| l.into()).collect::<Vec<Log>>());
+                        // Continue.
+                        Ok(true)
+                    }
+                    // Call failed.
+                    EVMResult {
+                        memory,
+                        result: Err(e),
+                        ..
+                    } => {
+                        // Copy returned revert data into memory.
+                        let (offset, size) = match e {
+                            EVMError::Revert(o, s) => (o, s),
+                            _ => (U256::ZERO, U256::ZERO),
+                        };
+                        {
+                            let bytes = memory.load(offset.saturating_to(), size.saturating_to());
+                            self.memory
+                                .store(ret_offset, ret_size, bytes.to_vec().as_ref());
+                            Ok(())
+                        }
+                        .map_err(EVMError::MemoryError)?;
+                        // Revert.
+                        Ok(false)
+                    }
+                }
+            })
+            .and_then(|status| self.stack.push(status as u8).map_err(EVMError::StackError))
+            {
                 Ok(_) => Some(()),
                 Err(e) => {
                     self.result = Some(Err(e));
@@ -1140,9 +1210,12 @@ impl<'a, 'b> Iterator for &mut EVM<'a, 'b> {
     }
 }
 
-impl<'a, 'b> EVM<'a, 'b> {
+impl<'a, 'b, 'c> EVM<'a, 'b, 'c> {
     pub fn execute(mut self) -> EVMResult {
         log::trace!("execute(): execute the bytecode");
+
+        // State snapshot.
+        //let env = self.env.clone();
 
         // Send Eth.
         if *self.message.value() != U256::ZERO {
@@ -1168,6 +1241,9 @@ impl<'a, 'b> EVM<'a, 'b> {
         let iter = &mut self.into_iter();
         while let Some(_) = iter.next() {}
 
+        // Restore previous state snapshot if the call reverted.
+        // TODO
+
         log::trace!("execution completed");
         self.into()
     }
@@ -1181,8 +1257,8 @@ pub(crate) struct EVMResult {
     result: Result<(U256, U256)>,
 }
 
-impl<'a, 'b> From<EVM<'a, 'b>> for EVMResult {
-    fn from(evm: EVM<'a, 'b>) -> Self {
+impl<'a, 'b, 'c> From<EVM<'a, 'b, 'c>> for EVMResult {
+    fn from(evm: EVM<'a, 'b, 'c>) -> Self {
         Self {
             stack: evm.stack.into(),
             memory: evm.memory.into(),

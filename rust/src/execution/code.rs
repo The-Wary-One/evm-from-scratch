@@ -76,6 +76,7 @@ pub(super) enum Opcode {
     DUP(usize),
     SWAP(usize),
     LOG(usize),
+    CALL,
     RETURN,
     REVERT,
     INVALID,
@@ -223,6 +224,7 @@ impl Code {
                     let n: usize = (byte - 0xA0).into();
                     LOG(n)
                 }
+                0xF1 => CALL,
                 0xF3 => RETURN,
                 0xFD => REVERT,
                 0xFE | _ => INVALID,

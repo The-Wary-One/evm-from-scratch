@@ -59,6 +59,22 @@ where
         }
     }
 
+    pub(crate) fn call(
+        caller: &'a Address,
+        target: &'a Address,
+        gas: &'a U256,
+        value: &'a U256,
+        data: &'b Calldata<'a>,
+    ) -> Self {
+        Self::Call {
+            caller,
+            target,
+            gas,
+            value,
+            data,
+        }
+    }
+
     pub(crate) fn staticcall(
         caller: &'a Address,
         target: &'a Address,

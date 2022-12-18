@@ -126,3 +126,15 @@ impl From<Log> for LogResult {
         }
     }
 }
+
+impl From<LogResult> for Log {
+    fn from(l: LogResult) -> Self {
+        match l.topics.len() {
+            0 => Self::log0(l.address, l.data),
+            1 => Self::log1(l.address, l.topics.try_into().expect("safe"), l.data),
+            2 => Self::log2(l.address, l.topics.try_into().expect("safe"), l.data),
+            3 => Self::log3(l.address, l.topics.try_into().expect("safe"), l.data),
+            _ => Self::log4(l.address, l.topics.try_into().expect("safe"), l.data),
+        }
+    }
+}

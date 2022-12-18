@@ -2,7 +2,7 @@ use super::{State, U256_DEFAULT};
 use crate::types::Address;
 use ruint::aliases::U256;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Items external to the virtual machine itself, provided by the environment.
 pub struct Environment<'a> {
     caller: &'a Address,
