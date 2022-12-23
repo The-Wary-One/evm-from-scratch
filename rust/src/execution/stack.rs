@@ -8,7 +8,7 @@ pub(crate) struct Stack {
     arr: [U256; 1024],
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum StackError {
     StackOverflow,
     NotEnoughValuesOnStack,
@@ -33,17 +33,13 @@ impl Stack {
         }
     }
 
-    pub(super) fn top(&self) -> Option<usize> {
-        self.top
-    }
-
     pub(super) fn push<T>(&mut self, n: T) -> Result<()>
     where
         U256: UintTryFrom<T>,
     {
         let n = U256::saturating_from(n);
         log::trace!(
-            "push(n={}): top={:?}, arr={:02X?}",
+            "push(n={:02X?}): top={:02X?}, arr={:02X?}",
             n,
             self.top,
             &self.arr[..=self.top.unwrap_or_default()]
@@ -115,7 +111,7 @@ impl Stack {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct StackResult {
     /// The index of the stack's top.
     top: Option<usize>,
@@ -135,17 +131,19 @@ impl StackResult {
     pub fn top(&self) -> Option<usize> {
         self.top
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.top().is_none()
-    }
 }
 
-impl From<&StackResult> for Vec<U256> {
+impl From<&StackResult> for Box<[U256]> {
     fn from(s: &StackResult) -> Self {
         match s.top() {
-            None => Vec::default(),
-            Some(top) => s.arr.into_iter().take(top + 1).rev().collect::<Vec<_>>(),
+            None => Box::default(),
+            Some(top) => s
+                .arr
+                .into_iter()
+                .take(top + 1)
+                .rev()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
         }
     }
 }

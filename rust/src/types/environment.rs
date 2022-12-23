@@ -94,6 +94,10 @@ impl<'a> Environment<'a> {
         &mut self.state
     }
 
+    pub fn set_state(&mut self, new: State) {
+        self.state = new;
+    }
+
     pub fn chain_id(&self) -> &U256 {
         &self.chain_id
     }

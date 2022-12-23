@@ -1,5 +1,5 @@
 use super::Calldata;
-use crate::types::Address;
+use crate::types::{Address, U256_DEFAULT};
 use ruint::aliases::U256;
 
 #[derive(Debug)]
@@ -21,11 +21,18 @@ where
         value: &'a U256,
         data: &'b Calldata<'a>,
     },
+    Delegatecall {
+        caller: &'a Address,
+        target: &'a Address,
+        delegate: &'a Address,
+        gas: &'a U256,
+        value: &'a U256,
+        data: &'b Calldata<'a>,
+    },
     Staticcall {
         caller: &'a Address,
         target: &'a Address,
         gas: &'a U256,
-        value: &'a U256,
         data: &'b Calldata<'a>,
     },
 }
@@ -75,18 +82,32 @@ where
         }
     }
 
+    pub(crate) fn delegatecall(
+        parent_call: &'a Message,
+        delegate: &'a Address,
+        gas: &'a U256,
+        data: &'b Calldata<'a>,
+    ) -> Self {
+        Self::Delegatecall {
+            caller: parent_call.caller(),
+            target: parent_call.target(),
+            delegate,
+            gas,
+            value: parent_call.value(),
+            data,
+        }
+    }
+
     pub(crate) fn staticcall(
         caller: &'a Address,
         target: &'a Address,
         gas: &'a U256,
-        value: &'a U256,
         data: &'b Calldata<'a>,
     ) -> Self {
         Self::Staticcall {
             caller,
             target,
             gas,
-            value,
             data,
         }
     }
@@ -94,14 +115,17 @@ where
     pub(crate) fn caller(&self) -> &Address {
         use Message::*;
         match self {
-            Call { caller, .. } | Staticcall { caller, .. } | Create { caller, .. } => caller,
+            Call { caller, .. }
+            | Delegatecall { caller, .. }
+            | Staticcall { caller, .. }
+            | Create { caller, .. } => caller,
         }
     }
 
     pub(crate) fn target(&self) -> &Address {
         use Message::*;
         match self {
-            Call { target, .. } | Staticcall { target, .. } => target,
+            Call { target, .. } | Delegatecall { target, .. } | Staticcall { target, .. } => target,
             Create { .. } => todo!(),
         }
     }
@@ -109,14 +133,18 @@ where
     pub(crate) fn value(&self) -> &U256 {
         use Message::*;
         match self {
-            Call { value, .. } | Staticcall { value, .. } | Create { value, .. } => &value,
+            Call { value, .. } | Delegatecall { value, .. } | Create { value, .. } => &value,
+            Staticcall { .. } => &U256_DEFAULT,
         }
     }
 
     pub(crate) fn data(&self) -> &Calldata {
         use Message::*;
         match &self {
-            Call { data, .. } | Staticcall { data, .. } | Create { data, .. } => &data,
+            Call { data, .. }
+            | Delegatecall { data, .. }
+            | Staticcall { data, .. }
+            | Create { data, .. } => &data,
         }
     }
 

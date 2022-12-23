@@ -50,6 +50,8 @@ pub(super) enum Opcode {
     GASPRICE,
     EXTCODESIZE,
     EXTCODECOPY,
+    RETURNDATASIZE,
+    RETURNDATACOPY,
     EXTCODEHASH,
     BLOCKHASH,
     COINBASE,
@@ -78,6 +80,8 @@ pub(super) enum Opcode {
     LOG(usize),
     CALL,
     RETURN,
+    DELEGATECALL,
+    STATICCALL,
     REVERT,
     INVALID,
 }
@@ -178,6 +182,8 @@ impl Code {
                 0x3A => GASPRICE,
                 0x3B => EXTCODESIZE,
                 0x3C => EXTCODECOPY,
+                0x3D => RETURNDATASIZE,
+                0x3E => RETURNDATACOPY,
                 0x3F => EXTCODEHASH,
                 0x40 => BLOCKHASH,
                 0x41 => COINBASE,
@@ -226,6 +232,8 @@ impl Code {
                 }
                 0xF1 => CALL,
                 0xF3 => RETURN,
+                0xF4 => DELEGATECALL,
+                0xFA => STATICCALL,
                 0xFD => REVERT,
                 0xFE | _ => INVALID,
             };
@@ -238,7 +246,7 @@ impl Code {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum CodeError {
     InvalidJumpdest,
 }
@@ -257,12 +265,12 @@ impl Iterator for Code {
     type Item = Opcode;
 
     fn next(&mut self) -> Option<Self::Item> {
-        log::trace!(
-            "next(): bytecode={:02X?}, pc={:?}, opcodes={:?}",
-            self.bytecode,
-            self.pc,
-            self.opcodes
-        );
+        //log::trace!(
+        //    "next(): bytecode={:02X?}, pc={:?}, opcodes={:?}",
+        //    self.bytecode,
+        //    self.pc,
+        //    self.opcodes
+        //);
 
         let mut pc = self.pc;
 
@@ -290,19 +298,11 @@ impl Iterator for Code {
 }
 
 #[derive(Debug)]
-pub(super) struct CodeResult {
-    bytecode: Vec<u8>,
-    opcodes: Vec<Option<Opcode>>,
-    pc: usize,
-}
+pub(super) struct CodeResult {}
 
 impl From<Code> for CodeResult {
-    fn from(code: Code) -> Self {
-        Self {
-            bytecode: code.bytecode,
-            opcodes: code.opcodes,
-            pc: code.pc,
-        }
+    fn from(_: Code) -> Self {
+        Self {}
     }
 }
 

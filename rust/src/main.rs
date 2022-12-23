@@ -177,8 +177,8 @@ fn main() {
 
         let is_expected_status = result.success == test.expect.success;
 
-        let is_expected_stack = test.expect.stack == result.stack;
-        let is_expected_logs = test.expect.logs == result.logs;
+        let is_expected_stack = test.expect.stack == result.stack.to_vec();
+        let is_expected_logs = test.expect.logs == result.logs.to_vec();
 
         let test_passed = is_expected_status && is_expected_stack && is_expected_logs;
 
@@ -199,12 +199,12 @@ fn main() {
 
             println!("Actual success: {:?}", result.success);
             println!("Actual stack: [");
-            for v in result.stack {
+            for v in result.stack.as_ref() {
                 println!("  {:#X},", v);
             }
             println!("]\n");
             println!("Actual logs: [");
-            for v in result.logs {
+            for v in result.logs.as_ref() {
                 println!("  {:?},", v);
             }
             println!("]\n");

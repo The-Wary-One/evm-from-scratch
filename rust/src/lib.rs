@@ -6,8 +6,8 @@ use execution::*;
 use types::*;
 
 pub struct TestResult {
-    pub stack: Vec<U256>,
-    pub logs: Vec<LogResult>,
+    pub stack: Box<[U256]>,
+    pub logs: Box<[LogResult]>,
     pub success: bool,
 }
 
@@ -16,7 +16,7 @@ impl<'a> From<EVMResult> for TestResult {
         Self {
             stack: result.stack().into(),
             logs: result.logs().to_owned(),
-            success: result.result().is_ok(),
+            success: result.status(),
         }
     }
 }

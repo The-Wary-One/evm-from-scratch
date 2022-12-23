@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::types::Bytesize;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct Memory {
     mem: RefCell<Vec<u8>>,
 }
@@ -30,41 +30,40 @@ impl Memory {
             .resize(length + usize::from(Bytesize::MAX) + 1, 0x00);
     }
 
-    pub(super) fn load(&self, offset: usize, size: usize) -> Vec<u8> {
+    pub(super) fn load(&self, offset: usize, size: usize) -> Box<[u8]> {
         log::trace!(
-            "load(): mem={:?}, offset={:?}, size={:?}",
+            "load(): mem={:02X?}, offset={:02X?}, size={:02X?}",
             self.mem,
             offset,
             size
         );
 
-        let value = if offset + size == 0 {
-            vec![]
+        let max = offset + size;
+        let value = if max == 0 {
+            Box::new([])
         } else {
-            let max = offset + size - 1;
             // Expand memory if needed.
             while self.size() < max {
                 self.expand_mem();
             }
 
             // Load from memory.
-            let r = Ref::map(self.mem.borrow(), |r| r.get(offset..=max).expect("safe"));
-            r.to_owned()
+            let r = Ref::map(self.mem.borrow(), |r| r.get(offset..max).expect("safe"));
+            r.to_owned().into_boxed_slice()
         };
 
-        log::trace!("result: mem={:?}, value={:?}", self.mem, value);
+        log::trace!("result: mem={:02X?}, value={:02X?}", self.mem, value);
         value
     }
 
     pub(super) fn load_u256(&self, offset: usize) -> U256 {
-        log::trace!("load_u256(): mem={:?}, offset={:?}", self.mem, offset);
         let b = self.load(offset, 0x20);
         U256::try_from_be_slice(&b).expect("safe")
     }
 
     pub(super) fn store(&mut self, offset: usize, size: usize, value: &[u8]) {
         log::trace!(
-            "store(): mem={:?}, offset={:?}, size={:?}, value={:?}",
+            "store(): mem={:02X?}, offset={:02X?}, size={:02X?}, value={:02X?}",
             self.mem,
             offset,
             size,
@@ -72,15 +71,20 @@ impl Memory {
         );
 
         let max = offset + size;
-        // Expand memory if needed.
-        while self.size() < max {
-            self.expand_mem();
+        if max != 0 {
+            // Expand memory if needed.
+            while self.size() < max {
+                self.expand_mem();
+            }
+
+            // Write to memory.
+            let mem = self.mem.get_mut();
+            for i in 0..size {
+                mem[offset + i] = value.get(i).map(|&b| b).unwrap_or_default();
+            }
         }
 
-        // Write to memory.
-        let _ = &mut self.mem.get_mut()[offset..max].copy_from_slice(value);
-
-        log::trace!("result: mem={:?}", self.mem);
+        log::trace!("result: mem={:02X?}", self.mem);
     }
 
     pub(super) fn store_u256(&mut self, offset: usize, value: U256) {
@@ -92,14 +96,10 @@ impl Memory {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct MemoryResult(Memory);
 
-impl MemoryResult {
-    pub(super) fn load(&self, offset: usize, size: usize) -> Vec<u8> {
-        self.0.load(offset, size)
-    }
-}
+impl MemoryResult {}
 
 impl From<Memory> for MemoryResult {
     fn from(mem: Memory) -> Self {
@@ -107,7 +107,17 @@ impl From<Memory> for MemoryResult {
     }
 }
 
-pub(super) type Result<T> = std::result::Result<T, MemoryError>;
+//pub(super) type Result<T> = std::result::Result<T, MemoryError>;
 
-#[derive(Error, Debug)]
-pub enum MemoryError {}
+#[derive(Error, Debug, Clone)]
+pub enum MemoryError {
+    OffsetHigherThanSize,
+}
+
+impl std::fmt::Display for MemoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemoryError::OffsetHigherThanSize => write!(f, "offset higher than size"),
+        }
+    }
+}
