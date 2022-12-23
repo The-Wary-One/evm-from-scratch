@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 hex = { version = "0.4", features = ["serde"] }
-ruint = { version = "1.7", features = ["serde"] }
+ruint = { version = "1.7", features = ["serde", "rlp"] }
 serde = { version = "1.0.145", features = ["derive"] }
 serde_json = "1.0.86"
 serde_path_to_error = "0.1.8"
@@ -16,3 +16,4 @@ thiserror = "1.0"
 log = "0.4"
 env_logger = "0.9"
 sha3 = "0.10"
+rlp = "0.5"

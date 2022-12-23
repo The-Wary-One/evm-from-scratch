@@ -1,21 +1,21 @@
-use std::collections::HashMap;
-
+use super::U256_DEFAULT;
 use ruint::{aliases::U256, uint};
 use sha3::Digest;
+use std::collections::HashMap;
 use thiserror::Error;
-
-use super::U256_DEFAULT;
 
 #[derive(Debug, Clone)]
 /// State associated with an address.
 pub enum Account {
     Empty,
     ExternallyOwned {
+        nonce: usize,
         balance: U256,
     },
     Contract {
+        nonce: usize,
         balance: U256,
-        code: Vec<u8>,
+        code: Box<[u8]>,
         storage: HashMap<U256, U256>,
     },
 }
@@ -23,13 +23,17 @@ pub enum Account {
 pub static EMPTY_ACCOUNT: Account = Account::Empty;
 
 impl Account {
-    pub fn new(balance: Option<U256>, code: Option<Vec<u8>>) -> Self {
+    pub fn new(balance: Option<U256>, code: Option<Box<[u8]>>) -> Self {
         log::trace!("new(): balance={:?}, code={:?}", balance, code);
 
         let res = match (balance, code) {
             (None, None) => Account::Empty,
-            (Some(b), None) => Account::ExternallyOwned { balance: b },
+            (Some(b), None) => Account::ExternallyOwned {
+                nonce: 0,
+                balance: b,
+            },
             (None, Some(c)) | (Some(_), Some(c)) => Account::Contract {
+                nonce: 0,
                 balance: balance.unwrap_or_default(),
                 code: c,
                 storage: HashMap::new(),
@@ -40,28 +44,40 @@ impl Account {
         res
     }
 
+    pub fn nonce(&self) -> &usize {
+        match self {
+            Account::Empty => &0,
+            Account::ExternallyOwned { nonce, .. } | Account::Contract { nonce, .. } => &nonce,
+        }
+    }
+
     pub fn balance(&self) -> &U256 {
         match self {
             Account::Empty => &U256::ZERO,
-            Account::ExternallyOwned { balance } | Account::Contract { balance, .. } => balance,
+            Account::ExternallyOwned { balance, .. } | Account::Contract { balance, .. } => balance,
         }
     }
 
     pub fn increase_balance(self, amount: &U256) -> Result<Self> {
         match self {
-            Account::Empty => Ok(self),
-            Account::ExternallyOwned { balance } => balance
+            Account::Empty => Ok(Self::ExternallyOwned {
+                nonce: 0,
+                balance: *amount,
+            }),
+            Account::ExternallyOwned { balance, nonce } => balance
                 .checked_add(*amount)
-                .map(|balance| Self::ExternallyOwned { balance })
+                .map(|balance| Self::ExternallyOwned { nonce, balance })
                 // Improbable.
                 .ok_or(AccountError::TooMuchMoney),
             Account::Contract {
+                nonce,
                 balance,
                 code,
                 storage,
             } => balance
                 .checked_add(*amount)
                 .map(|balance| Self::Contract {
+                    nonce,
                     balance,
                     code,
                     storage,
@@ -73,19 +89,21 @@ impl Account {
 
     pub fn decrease_balance(self, amount: &U256) -> Result<Self> {
         match self {
-            Account::Empty => Ok(self),
-            Account::ExternallyOwned { balance } => balance
+            Account::Empty => Err(AccountError::NotEnoughBalance),
+            Account::ExternallyOwned { nonce, balance } => balance
                 .checked_sub(*amount)
-                .map(|balance| Self::ExternallyOwned { balance })
+                .map(|balance| Self::ExternallyOwned { nonce, balance })
                 // Improbable.
                 .ok_or(AccountError::NotEnoughBalance),
             Account::Contract {
+                nonce,
                 balance,
                 code,
                 storage,
             } => balance
                 .checked_sub(*amount)
                 .map(|balance| Self::Contract {
+                    nonce,
                     balance,
                     code,
                     storage,
@@ -97,9 +115,36 @@ impl Account {
 
     pub fn code(&self) -> &[u8] {
         match self {
-            Account::Empty => &[],
-            Account::ExternallyOwned { .. } => &[],
+            Account::Empty | Account::ExternallyOwned { .. } => &[],
             Account::Contract { code, .. } => code,
+        }
+    }
+
+    pub fn set_code(self, code: Box<[u8]>) -> Result<Self> {
+        match self {
+            Account::Empty => Ok(Self::Contract {
+                nonce: 0,
+                balance: U256::ZERO,
+                code,
+                storage: HashMap::new(),
+            }),
+            Account::ExternallyOwned { nonce, balance } => Ok(Self::Contract {
+                nonce,
+                balance,
+                code,
+                storage: HashMap::new(),
+            }),
+            Account::Contract {
+                nonce,
+                balance,
+                storage,
+                ..
+            } => Ok(Self::Contract {
+                nonce,
+                balance,
+                code,
+                storage,
+            }),
         }
     }
 
@@ -152,7 +197,7 @@ impl<'a> Default for Account {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum AccountError {
     TooMuchMoney,
     NotEnoughBalance,

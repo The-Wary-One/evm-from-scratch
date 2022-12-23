@@ -24,9 +24,18 @@ impl<'a> State {
         addr: &Address,
         f: impl FnOnce(Account) -> Result<Account>,
     ) -> Result<()> {
+        log::trace!("update_account(): account={:?}", self.get_account(&addr));
+
         let updated = f(self.get_account(addr).clone())?;
         self.accounts.insert(addr.clone(), updated);
+
+        log::trace!("result: account={:?}", self);
         Ok(())
+    }
+
+    pub(crate) fn delete_account(&mut self, addr: &Address) -> Result<()> {
+        log::trace!("delete_account(): address={:?}", addr);
+        self.update_account(addr, |_| Ok(Account::Empty))
     }
 
     pub(crate) fn send_eth(&mut self, from: &Address, to: &Address, amount: &U256) -> Result<()> {
@@ -37,18 +46,19 @@ impl<'a> State {
             amount
         );
 
-        self.update_account(from, |from_account| {
-            from_account
-                .decrease_balance(amount)
+        // ⚠️ Do not check the sender amount because of the invalid state data.
+        //self.update_account(from, |from_account| {
+        //    from_account
+        //        .decrease_balance(amount)
+        //        .map_err(StateError::AccountError)
+        //})
+        //.and_then(|_| {
+        self.update_account(to, |to_account| {
+            to_account
+                .increase_balance(amount)
                 .map_err(StateError::AccountError)
         })
-        .and_then(|_| {
-            self.update_account(to, |to_account| {
-                to_account
-                    .increase_balance(amount)
-                    .map_err(StateError::AccountError)
-            })
-        })
+        //})
     }
 }
 
@@ -60,7 +70,7 @@ impl Default for State {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum StateError {
     #[error(transparent)]
     AccountError(#[from] AccountError),

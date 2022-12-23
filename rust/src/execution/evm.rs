@@ -9,13 +9,13 @@ use crate::types::*;
 
 #[derive(Debug)]
 /// The internal state of the virtual machine.
-pub(crate) struct EVM<'a, 'b, 'c>
+pub(crate) struct EVM<'a, 'b, 'c, 'd>
 where
     'a: 'c,
-    'b: 'c,
+    'b: 'd,
 {
     pub(super) env: &'c mut Environment<'a>,
-    pub(super) message: &'c Message<'b, 'c>,
+    pub(super) message: &'d Message<'b, 'd>,
     pub(super) stack: Stack,
     pub(super) memory: Memory,
     pub(super) code: Code,
@@ -24,12 +24,12 @@ where
     pub(super) last_inner_call: Option<EVMResult>,
 }
 
-impl<'a, 'b, 'c> EVM<'a, 'b, 'c>
+impl<'a, 'b, 'c, 'd> EVM<'a, 'b, 'c, 'd>
 where
     'a: 'c,
-    'b: 'c,
+    'b: 'd,
 {
-    pub fn new(env: &'c mut Environment<'a>, message: &'c Message<'b, 'c>) -> EVM<'a, 'b, 'c> {
+    pub fn new(env: &'c mut Environment<'a>, message: &'d Message<'b, 'd>) -> EVM<'a, 'b, 'c, 'd> {
         match message {
             Message::Call { target, .. } | Message::Staticcall { target, .. } => {
                 let code = Code::new(env.state().get_account(target).code().clone());
@@ -59,7 +59,20 @@ where
                     last_inner_call: None,
                 }
             }
-            Message::Create { .. } => todo!(),
+            Message::Create { target, .. } => {
+                let code = Code::new(env.state().get_account(target).code().clone());
+
+                Self {
+                    env,
+                    message,
+                    stack: Stack::new(),
+                    memory: Memory::new(),
+                    code,
+                    logs: vec![],
+                    result: None,
+                    last_inner_call: None,
+                }
+            }
         }
     }
 }
@@ -74,6 +87,8 @@ pub enum EVMError {
     CodeError(#[from] CodeError),
     #[error(transparent)]
     MemoryError(#[from] MemoryError),
+    #[error(transparent)]
+    StateError(#[from] StateError),
 }
 
 impl<'a> Display for EVMError {
@@ -86,13 +101,14 @@ impl<'a> Display for EVMError {
             EVMError::StackError(e) => e.fmt(f),
             EVMError::CodeError(e) => e.fmt(f),
             EVMError::MemoryError(e) => e.fmt(f),
+            EVMError::StateError(e) => e.fmt(f),
         }
     }
 }
 
 type Result<T> = std::result::Result<T, EVMError>;
 
-impl<'a, 'b, 'c> EVM<'a, 'b, 'c> {
+impl<'a, 'b, 'c, 'd> EVM<'a, 'b, 'c, 'd> {
     pub fn execute(mut self) -> EVMResult {
         log::trace!("execute(): execute the bytecode");
 
@@ -109,6 +125,7 @@ impl<'a, 'b, 'c> EVM<'a, 'b, 'c> {
                 }
                 // Do not send ETH again when doing a delegate call.
                 Message::Delegatecall { .. } => {}
+                // Send ETH to target's account.
                 Message::Call { .. } | Message::Create { .. } => {
                     self.env
                         .state_mut()
@@ -122,7 +139,8 @@ impl<'a, 'b, 'c> EVM<'a, 'b, 'c> {
             }
         }
 
-        let iter = &mut self.into_iter();
+        // Iterate over bytecode.
+        let mut iter = self.into_iter();
         while let Some(_) = iter.next() {}
 
         // Restore previous state snapshot if the call reverted.
@@ -143,8 +161,8 @@ pub(crate) struct EVMResult {
     pub(super) status: bool,
 }
 
-impl<'a, 'b, 'c> From<EVM<'a, 'b, 'c>> for EVMResult {
-    fn from(evm: EVM<'a, 'b, 'c>) -> Self {
+impl<'a, 'b, 'c, 'd> From<EVM<'a, 'b, 'c, 'd>> for EVMResult {
+    fn from(evm: EVM<'a, 'b, 'c, 'd>) -> Self {
         let (offset, size) = match evm.result {
             Some(Ok((o, s))) => (o, s),
             Some(Err(EVMError::Revert(o, s))) => (o, s),

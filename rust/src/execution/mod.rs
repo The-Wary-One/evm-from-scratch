@@ -14,7 +14,11 @@ impl<'a, 'b> Message<'a, 'b>
 where
     'a: 'b,
 {
-    pub(crate) fn process(&'b self, env: &'b mut Environment<'a>) -> EVMResult {
+    pub(crate) fn process<'c, 'd>(self, env: &'d mut Environment<'c>) -> EVMResult
+    where
+        'c: 'd,
+        'c: 'a,
+    {
         match self {
             // Executes a call to an account.
             Message::Call { .. } |
@@ -23,16 +27,33 @@ where
             // Executes a staticcall to an account.
             Message::Staticcall { .. } => {
                 // Execute code.
-                let evm = EVM::new(env, self);
-                EVM::execute(evm).into()
+                let evm = EVM::new(env, &self);
+                EVM::execute(evm)
             }
-            // Executes a create a smart contract account.
-            Message::Create { .. } => todo!(),
+            // Create a smart contract account.
+            Message::Create { .. } => {
+                // Set target's code to the initialization code.
+                let init_code = self.data().into();
+                env.state_mut().update_account(self.target(), |_| Ok(Account::new(None, Some(init_code)))).expect("safe");
+
+                // Execute code.
+                let evm = EVM::new(env, &self);
+                let result = EVM::execute(evm);
+
+                // Set target's code to the returned data.
+                env.state_mut().update_account(self.target(), |a| Ok(Account::new(Some(*a.balance()), Some(result.return_data().clone())))).expect("safe");
+
+                result
+            }
         }
     }
 }
 
-impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
+impl<'a, 'b, 'c, 'd> Iterator for &mut EVM<'a, 'b, 'c, 'd>
+where
+    'a: 'c,
+    'b: 'd,
+{
     type Item = ();
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -465,21 +486,16 @@ impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
                     None
                 }
             },
-            ADDRESS => match self.message {
-                Message::Create { .. } => todo!(),
-                _ => {
-                    match self
-                        .stack
-                        .push(<U256 as From<&Address>>::from(self.message.target()))
-                        .map_err(EVMError::StackError)
-                    {
-                        Ok(_) => Some(()),
-                        Err(e) => {
-                            self.result = Some(Err(e));
-                            // Stop.
-                            None
-                        }
-                    }
+            ADDRESS => match self
+                .stack
+                .push(<U256 as From<&Address>>::from(self.message.target()))
+                .map_err(EVMError::StackError)
+            {
+                Ok(_) => Some(()),
+                Err(e) => {
+                    self.result = Some(Err(e));
+                    // Stop.
+                    None
                 }
             },
             BALANCE => match self
@@ -1082,6 +1098,67 @@ impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
                     None
                 }
             },
+            CREATE => match (if self.message.is_staticcall() {
+                Err(EVMError::StateModificationDisallowed)
+            } else {
+                Ok(())
+            })
+            .and_then(|_| {
+                let args = { Ok((self.stack.pop()?, self.stack.pop()?, self.stack.pop()?)) };
+                let (value, offset, size) = args.map_err(EVMError::StackError)?;
+                let offset = offset.saturating_to();
+                let size = size.saturating_to();
+
+                // Instanciate a new EVM.
+                let nonce = self.env.state().get_account(self.message.target()).nonce();
+                let bytes = self.memory.load(offset, size);
+                let data = Calldata::new(&bytes);
+                let message = Message::create(
+                    self.message.target(),
+                    &nonce,
+                    self.message.gas(),
+                    &value,
+                    &data,
+                );
+                let target = message.target().clone();
+                let result = Message::process(message, self.env);
+
+                let res = match &result {
+                    // Call succeded.
+                    EVMResult {
+                        logs, status: true, ..
+                    } => {
+                        // Add result logs to logs.
+                        self.logs.append(
+                            &mut logs
+                                .into_iter()
+                                .map(|l| l.clone().into())
+                                .collect::<Vec<Log>>(),
+                        );
+                        // Continue.
+                        <U256 as From<&Address>>::from(&target)
+                    }
+                    // Call failed.
+                    EVMResult { status: false, .. } => {
+                        // Revert.
+                        U256::ZERO
+                    }
+                };
+
+                // Store call.
+                self.last_inner_call = Some(result.clone());
+
+                Ok(res)
+            })
+            .and_then(|res| self.stack.push(res).map_err(EVMError::StackError))
+            {
+                Ok(_) => Some(()),
+                Err(e) => {
+                    self.result = Some(Err(e));
+                    // Stop.
+                    None
+                }
+            },
             CALL => match (if self.message.is_staticcall() {
                 Err(EVMError::StateModificationDisallowed)
             } else {
@@ -1111,8 +1188,7 @@ impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
                 let bytes = self.memory.load(args_offset, args_size);
                 let data = Calldata::new(&bytes);
                 let message = Message::call(self.message.target(), &target, &gas, &value, &data);
-                let evm = EVM::new(self.env, &message);
-                let result = EVM::execute(evm);
+                let result = Message::process(message, self.env);
 
                 let status = match &result {
                     // Call succeded.
@@ -1206,8 +1282,7 @@ impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
                 let bytes = self.memory.load(args_offset, args_size);
                 let data = Calldata::new(&bytes);
                 let message = Message::delegatecall(&self.message, &target, &gas, &data);
-                let evm = EVM::new(self.env, &message);
-                let result = EVM::execute(evm);
+                let result = Message::process(message, self.env);
 
                 let status = match &result {
                     // Call succeded.
@@ -1280,8 +1355,7 @@ impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
                     let bytes = self.memory.load(args_offset, args_size);
                     let data = Calldata::new(&bytes);
                     let message = Message::staticcall(self.message.target(), &target, &gas, &data);
-                    let evm = EVM::new(self.env, &message);
-                    let result = EVM::execute(evm);
+                    let result = Message::process(message, self.env);
 
                     // Copy the returned data to memory.
                     self.memory
@@ -1323,6 +1397,43 @@ impl<'a, 'b, 'c> Iterator for &mut EVM<'a, 'b, 'c> {
                 // Stop.
                 None
             }
+            SELFDESTRUCT => match (if self.message.is_staticcall() {
+                Err(EVMError::StateModificationDisallowed)
+            } else {
+                Ok(())
+            })
+            .and_then(|_| {
+                self.stack
+                    .pop()
+                    .map(Address::from)
+                    .map_err(EVMError::StackError)
+            })
+            .and_then(|addr| {
+                let amount = self
+                    .env
+                    .state()
+                    .get_account(self.message.target())
+                    .balance()
+                    .clone();
+
+                let state = self.env.state_mut();
+
+                state
+                    .send_eth(self.message.target(), &addr, &amount)
+                    .and_then(|_| state.delete_account(self.message.target()))
+                    .map_err(EVMError::StateError)
+            }) {
+                Ok(_) => {
+                    self.result = Some(Ok((U256::ZERO, U256::ZERO)));
+                    // Stop.
+                    None
+                }
+                Err(e) => {
+                    self.result = Some(Err(e));
+                    // Stop.
+                    None
+                }
+            },
         }
     }
 }

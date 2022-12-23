@@ -25,6 +25,6 @@ impl Transaction {
     pub fn process<'a>(&'a self, env: &'a mut Environment<'a>) -> TestResult {
         let data = Calldata::new(self.data());
         let message = Message::new(self.from(), self.to(), self.gas(), self.value(), &data);
-        Message::process(&message, env).into()
+        Message::process(message, env).into()
     }
 }

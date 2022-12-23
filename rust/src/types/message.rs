@@ -1,6 +1,7 @@
 use super::Calldata;
 use crate::types::{Address, U256_DEFAULT};
-use ruint::aliases::U256;
+use ruint::aliases::{U160, U256};
+use sha3::Digest;
 
 #[derive(Debug)]
 /// Items that are used by contract creation or message call.
@@ -10,6 +11,7 @@ where
 {
     Create {
         caller: &'a Address,
+        target: Address,
         gas: &'a U256,
         value: &'a U256,
         data: &'b Calldata<'a>,
@@ -49,20 +51,9 @@ where
         data: &'b Calldata<'a>,
     ) -> Self {
         if let Some(target) = target {
-            Self::Call {
-                caller,
-                target,
-                gas,
-                value,
-                data,
-            }
+            Self::call(caller, target, gas, value, data)
         } else {
-            Self::Create {
-                caller,
-                gas,
-                value,
-                data,
-            }
+            todo!()
         }
     }
 
@@ -112,21 +103,48 @@ where
         }
     }
 
+    pub(crate) fn create(
+        caller: &'a Address,
+        caller_nonce: &usize,
+        gas: &'a U256,
+        value: &'a U256,
+        data: &'b Calldata<'a>,
+    ) -> Self {
+        // Calculate the deployment address.
+        let mut hasher = sha3::Keccak256::new();
+        hasher.update(rlp::encode_list(&[
+            caller.into(),
+            U256::from(*caller_nonce),
+        ]));
+        let hash = hasher.finalize();
+        let target = U160::try_from_be_slice(&hash[0x0C..]).expect("safe").into();
+
+        Self::Create {
+            caller,
+            target,
+            gas,
+            value,
+            data,
+        }
+    }
+
     pub(crate) fn caller(&self) -> &Address {
         use Message::*;
         match self {
             Call { caller, .. }
             | Delegatecall { caller, .. }
             | Staticcall { caller, .. }
-            | Create { caller, .. } => caller,
+            | Create { caller, .. } => &caller,
         }
     }
 
     pub(crate) fn target(&self) -> &Address {
         use Message::*;
         match self {
-            Call { target, .. } | Delegatecall { target, .. } | Staticcall { target, .. } => target,
-            Create { .. } => todo!(),
+            Call { target, .. } | Delegatecall { target, .. } | Staticcall { target, .. } => {
+                &target
+            }
+            Create { target, .. } => &target,
         }
     }
 
@@ -138,6 +156,15 @@ where
         }
     }
 
+    pub(crate) fn gas(&self) -> &U256 {
+        use Message::*;
+        match &self {
+            Call { gas, .. }
+            | Delegatecall { gas, .. }
+            | Staticcall { gas, .. }
+            | Create { gas, .. } => &gas,
+        }
+    }
     pub(crate) fn data(&self) -> &Calldata {
         use Message::*;
         match &self {

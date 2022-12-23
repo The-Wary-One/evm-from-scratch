@@ -8,19 +8,19 @@ impl<'a> Calldata<'a> {
         Self(data)
     }
 
-    pub(crate) fn load(&self, i: usize, size: usize) -> Vec<u8> {
+    pub(crate) fn load(&self, offset: usize, size: usize) -> Box<[u8]> {
         let mut bytes = vec![0x00; size];
         for n in 0..size {
-            let b = self.0.get(i + n).unwrap_or(&0);
+            let b = self.0.get(offset + n).unwrap_or(&0);
             bytes[n] = *b;
         }
-        bytes
+        bytes.into_boxed_slice()
     }
 
-    pub(crate) fn load_word(&self, i: usize) -> [u8; 0x20] {
+    pub(crate) fn load_word(&self, offset: usize) -> [u8; 0x20] {
         let mut bytes = [0x00; 0x20];
         for n in 0..=<usize>::from(Bytesize::MAX) {
-            let b = self.0.get(i + n).unwrap_or(&0);
+            let b = self.0.get(offset + n).unwrap_or(&0);
             bytes[n] = *b;
         }
         bytes
@@ -28,6 +28,18 @@ impl<'a> Calldata<'a> {
 
     pub(crate) fn size(&self) -> usize {
         self.0.len()
+    }
+}
+
+impl<'a> From<&Calldata<'a>> for &'a [u8] {
+    fn from(c: &Calldata<'a>) -> Self {
+        c.0
+    }
+}
+
+impl<'a> From<&Calldata<'a>> for Box<[u8]> {
+    fn from(c: &Calldata<'a>) -> Self {
+        c.load(0, c.size())
     }
 }
 

@@ -143,7 +143,12 @@ fn main() {
             .state
             .clone()
             .into_iter()
-            .map(|(k, v)| (k.clone(), Account::new(v.balance, v.code.map(|c| c.bin))))
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    Account::new(v.balance, v.code.map(|c| c.bin.into_boxed_slice())),
+                )
+            })
             .collect::<HashMap<Address, Account>>();
         // Give from ETH.
         accounts.insert(from, Account::new(Some(test.tx.value), None));
@@ -154,7 +159,7 @@ fn main() {
                 accounts
                     .get(&to.expect("safe"))
                     .map(|a| a.balance().clone()),
-                Some(test.code.bin.clone()),
+                Some(test.code.bin.clone().into_boxed_slice()),
             ),
         );
         let state = State::new(accounts);
